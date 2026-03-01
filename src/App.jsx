@@ -29,6 +29,7 @@ const shipUid = () => "SHP-" + Math.floor(1000 + Math.random() * 9000);
 const fmt = (n) => "$" + Number(n||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtK = (n) => n >= 1000 ? "$" + (n/1000).toFixed(1)+"k" : "$"+n;
 const td = () => new Date().toISOString().split("T")[0];
+const safeDate=(s)=>{if(!s)return null;const d=new Date(s);return isNaN(d.getTime())?null:d};
 
 // ─── DEFAULT DATA ────────────────────────────────────────────────────────────
 const DEFAULT_ITEMS = [
@@ -473,7 +474,7 @@ function generateInventoryReport(items){
   const now=new Date();
   const rows=items.map(i=>{
     const margin=i.price>0?((i.price-i.cost)/i.price*100).toFixed(1):"";
-    const days=Math.floor((now-new Date(i.received))/(1000*60*60*24));
+    const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;
     return[i.id,i.name,i.sku,i.barcode,i.category,i.condition,i.status,i.channel||"",i.cost,i.price||"",margin,i.source,i.received,i.soldDate||"",days,i.notes||""].map(v=>JSON.stringify(String(v))).join(",");
   });
   const csv=[headers.join(","),...rows].join("\n");
@@ -815,10 +816,10 @@ function AnalyticsPage({items,expenses,shipments}){
   const now=new Date();
   const agingBuckets={"0-7 days":0,"8-14 days":0,"15-30 days":0,"31-60 days":0,"60+ days":0};
   const agingItems=items.filter(i=>!["Sold","Shipped"].includes(i.status));
-  agingItems.forEach(i=>{const days=Math.floor((now-new Date(i.received))/(1000*60*60*24));if(days<=7)agingBuckets["0-7 days"]++;else if(days<=14)agingBuckets["8-14 days"]++;else if(days<=30)agingBuckets["15-30 days"]++;else if(days<=60)agingBuckets["31-60 days"]++;else agingBuckets["60+ days"]++});
+  agingItems.forEach(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;if(days<=7)agingBuckets["0-7 days"]++;else if(days<=14)agingBuckets["8-14 days"]++;else if(days<=30)agingBuckets["15-30 days"]++;else if(days<=60)agingBuckets["31-60 days"]++;else agingBuckets["60+ days"]++});
   const agingData=Object.entries(agingBuckets).map(([range,count])=>({range,count}));
   const agingColors=["#10B981","#34D399","#F59E0B","#F97316","#F43F5E"];
-  const totalAgingCost={};agingItems.forEach(i=>{const days=Math.floor((now-new Date(i.received))/(1000*60*60*24));const bucket=days<=7?"0-7 days":days<=14?"8-14 days":days<=30?"15-30 days":days<=60?"31-60 days":"60+ days";totalAgingCost[bucket]=(totalAgingCost[bucket]||0)+i.cost});
+  const totalAgingCost={};agingItems.forEach(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;const bucket=days<=7?"0-7 days":days<=14?"8-14 days":days<=30?"15-30 days":days<=60?"31-60 days":"60+ days";totalAgingCost[bucket]=(totalAgingCost[bucket]||0)+i.cost});
 
   // Channel performance
   const channelMap={};soldItems.forEach(i=>{if(!i.channel)return;if(!channelMap[i.channel])channelMap[i.channel]={revenue:0,cost:0,count:0,profit:0};channelMap[i.channel].revenue+=(i.price||0);channelMap[i.channel].cost+=i.cost;channelMap[i.channel].count++;channelMap[i.channel].profit+=(i.price||0)-i.cost});
@@ -828,7 +829,7 @@ function AnalyticsPage({items,expenses,shipments}){
   // Top performers
   const topProfit=[...soldItems].filter(i=>i.price>0).map(i=>({...i,profit:(i.price||0)-i.cost,margin:Math.round(((i.price-i.cost)/i.price)*100)})).sort((a,b)=>b.profit-a.profit).slice(0,5);
   const topMargin=[...soldItems].filter(i=>i.price>0).map(i=>({...i,profit:(i.price||0)-i.cost,margin:Math.round(((i.price-i.cost)/i.price)*100)})).sort((a,b)=>b.margin-a.margin).slice(0,5);
-  const fastestSellers=[...soldItems].filter(i=>i.soldDate&&i.received).map(i=>({...i,days:Math.max(0,Math.floor((new Date(i.soldDate)-new Date(i.received))/(1000*60*60*24))),profit:(i.price||0)-i.cost})).sort((a,b)=>a.days-b.days).slice(0,5);
+  const fastestSellers=[...soldItems].filter(i=>safeDate(i.soldDate)&&safeDate(i.received)).map(i=>{const sold=safeDate(i.soldDate);const rcvd=safeDate(i.received);return{...i,days:Math.max(0,Math.floor((sold-rcvd)/(1000*60*60*24))),profit:(i.price||0)-i.cost}}).sort((a,b)=>a.days-b.days).slice(0,5);
 
   const tabs2=[{id:"overview",label:"Overview"},{id:"aging",label:"Inventory Aging"},{id:"channels",label:"Channel Performance"},{id:"top",label:"Top Performers"}];
 
@@ -923,7 +924,7 @@ function AnalyticsPage({items,expenses,shipments}){
       <div className="eve-table-wrap" style={{background:"#171B24",border:"1px solid #1E2330",borderRadius:14,padding:24}}>
         <div style={{fontSize:15,fontWeight:600,marginBottom:16}}>Oldest Unsold Items</div>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{borderBottom:"1px solid #1E2330"}}>{["ID","Product","Category","Status","Cost","Price","Days Held","Source"].map(h=>(<th key={h} style={{padding:"10px 12px",textAlign:"left",fontSize:11,fontWeight:600,color:"#5A6478",textTransform:"uppercase"}}>{h}</th>))}</tr></thead><tbody>
-          {[...agingItems].sort((a,b)=>new Date(a.received)-new Date(b.received)).slice(0,10).map(i=>{const days=Math.floor((now-new Date(i.received))/(1000*60*60*24));return(<tr key={i.id} style={{borderBottom:"1px solid #1E2330"}}>
+          {[...agingItems].sort((a,b)=>(safeDate(a.received)||0)-(safeDate(b.received)||0)).slice(0,10).map(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;return(<tr key={i.id} style={{borderBottom:"1px solid #1E2330"}}>
             <td style={{padding:"10px 12px",fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"#818CF8"}}>{i.id}</td>
             <td style={{padding:"10px 12px",fontWeight:500,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i.name}</td>
             <td style={{padding:"10px 12px",color:"#8B95A9",fontSize:12}}>{i.category}</td>
@@ -1117,7 +1118,7 @@ function AlertsPage({items,expenses}){
   // Low margin items
   items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{const margin=((i.price-i.cost)/i.price)*100;if(margin<20)alerts.push({type:"warn",icon:"⚠️",title:`Low margin: ${i.name}`,desc:`Only ${margin.toFixed(0)}% margin (cost ${fmt(i.cost)}, price ${fmt(i.price)})`,category:"Low Margin"})});
   // Slow movers (listed > 10 days ago)
-  const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{const days=Math.floor((now-new Date(i.received))/(1000*60*60*24));if(days>10)alerts.push({type:"info",icon:"🐌",title:`Slow mover: ${i.name}`,desc:`Listed for ${days} days — consider a price drop`,category:"Slow Mover"})});
+  const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;if(days>10)alerts.push({type:"info",icon:"🐌",title:`Slow mover: ${i.name}`,desc:`Listed for ${days} days — consider a price drop`,category:"Slow Mover"})});
   // High value items stuck in processing/grading
   items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>100).forEach(i=>{alerts.push({type:"action",icon:"⏰",title:`High-value item in ${i.status}: ${i.name}`,desc:`${fmt(i.cost)} cost — move to Listed to start recovering`,category:"Action Needed"})});
   // Large expenses
@@ -1344,7 +1345,7 @@ export default function App(){
   const[customers,saveCustomers,cl]=useStorage("eve-customers",DEFAULT_CUSTOMERS,storageError);
   const[shipments,saveShipments,sl]=useStorage("eve-shipments",DEFAULT_SHIPMENTS,storageError);
 
-  const alertCount=useMemo(()=>{let c=0;items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{if(((i.price-i.cost)/i.price)*100<20)c++});const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{if(Math.floor((now-new Date(i.received))/(1000*60*60*24))>10)c++});items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>100).forEach(()=>c++);return c},[items]);
+  const alertCount=useMemo(()=>{let c=0;items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{if(((i.price-i.cost)/i.price)*100<20)c++});const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{const rcvd=safeDate(i.received);if(rcvd&&Math.floor((now-rcvd)/(1000*60*60*24))>10)c++});items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>100).forEach(()=>c++);return c},[items]);
 
   const awaitingShipCount=useMemo(()=>{const shipped=new Set(shipments.map(s=>s.itemId));return items.filter(i=>i.status==="Sold"&&!shipped.has(i.id)).length},[items,shipments]);
 
