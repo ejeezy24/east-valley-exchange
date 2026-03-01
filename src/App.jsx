@@ -116,8 +116,6 @@ const I={
   printer:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>,
   clock:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
   menu:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>,
-  ai:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-2 2.83V18a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3v-4.17A3 3 0 0 1 4 11v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="9.5" cy="12.5" r="1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="12.5" r="1" fill="currentColor" stroke="none"/><path d="M9.5 16.5c.5.5 1.5 1 2.5 1s2-.5 2.5-1"/></svg>,
-  send:<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>,
 };
 const icon = (i,s=18) => <span style={{width:s,height:s,display:"inline-flex",flexShrink:0}}>{i}</span>;
 
@@ -1414,169 +1412,10 @@ function ReportsPage({items,expenses,shipments}){
   </div>);
 }
 
-// ─── AI CHAT SIDEBAR ─────────────────────────────────────────────────────────
-function buildSystemPrompt(items,expenses,shipments,pos,customers){
-  const listed=items.filter(i=>i.status==="Listed");
-  const sold=items.filter(i=>["Sold","Shipped"].includes(i.status));
-  const totalRev=sold.reduce((s,i)=>s+(i.price||0),0);
-  const totalCost=sold.reduce((s,i)=>s+i.cost,0);
-  const totalExp=expenses.reduce((s,e)=>s+e.amount,0);
-  const totalInvCost=items.reduce((s,i)=>s+i.cost,0);
-  const listedValue=listed.reduce((s,i)=>s+(i.price||0),0);
-  const catCounts={};items.forEach(i=>{catCounts[i.category]=(catCounts[i.category]||0)+1});
-  const statusCounts={};items.forEach(i=>{statusCounts[i.status]=(statusCounts[i.status]||0)+1});
-  const channelRev={};sold.forEach(i=>{if(i.channel)channelRev[i.channel]=(channelRev[i.channel]||0)+(i.price||0)});
-  const topCats=Object.entries(catCounts).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([c,n])=>`${c}: ${n}`).join(", ");
-  const topChannels=Object.entries(channelRev).sort((a,b)=>b[1]-a[1]).map(([c,r])=>`${c}: $${r.toFixed(0)}`).join(", ");
-  const statLine=Object.entries(statusCounts).map(([s,n])=>`${s}: ${n}`).join(", ");
-  const recentItems=items.slice(0,8).map(i=>`• ${i.name} (${i.id}) — ${i.status}, cost $${i.cost}, price $${i.price||0}`).join("\n");
-
-  return `You are the AI assistant for East Valley Exchange (EVX), a recommerce/liquidation resale business based in the East Valley area of Arizona. You help the owner manage inventory, pricing, sourcing, and business strategy.
-
-CURRENT BUSINESS SNAPSHOT:
-- Total inventory items: ${items.length}
-- Items by status: ${statLine}
-- Total inventory cost: $${totalInvCost.toFixed(2)}
-- Listed value (ask prices): $${listedValue.toFixed(2)}
-- Items sold: ${sold.length} for $${totalRev.toFixed(2)} revenue
-- COGS on sold items: $${totalCost.toFixed(2)}
-- Gross profit: $${(totalRev-totalCost).toFixed(2)} (${totalRev>0?((totalRev-totalCost)/totalRev*100).toFixed(1):"0"}% margin)
-- Operating expenses: $${totalExp.toFixed(2)}
-- Active purchase orders: ${pos.filter(p=>!["Complete"].includes(p.status)).length}
-- Customers: ${customers.length}
-- Top categories: ${topCats}
-- Revenue by channel: ${topChannels}
-
-RECENT INVENTORY:
-${recentItems}
-
-Keep answers concise and actionable. Use dollar amounts and percentages when discussing financials. You can reference specific items by their EVE-#### IDs. If the user asks about something you don't have data for, say so. Format responses with markdown when helpful.`;
-}
-
-function ChatSidebar({open,onClose,items,expenses,shipments,pos,customers}){
-  const[messages,setMessages]=useState([]);
-  const[input,setInput]=useState("");
-  const[loading,setLoading]=useState(false);
-  const[error,setError]=useState(null);
-  const scrollRef=useRef(null);
-  const inputRef=useRef(null);
-
-  useEffect(()=>{if(open&&inputRef.current)setTimeout(()=>inputRef.current?.focus(),300)},[open]);
-  useEffect(()=>{if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight},[messages,loading]);
-
-  const sendMessage=async()=>{
-    const text=input.trim();if(!text||loading)return;
-    setInput("");setError(null);
-    const userMsg={role:"user",content:text};
-    const newMessages=[...messages,userMsg];
-    setMessages(newMessages);
-    setLoading(true);
-    try{
-      const systemPrompt=buildSystemPrompt(items,expenses,shipments,pos,customers);
-      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:newMessages,systemPrompt})});
-      const data=await res.json();
-      if(!res.ok)throw new Error(data.error||"Failed to get response");
-      setMessages(prev=>[...prev,{role:"assistant",content:data.response}]);
-    }catch(err){
-      setError(err.message||"Failed to reach AI. Check your API key configuration.");
-    }finally{setLoading(false)}
-  };
-
-  const handleKeyDown=(e)=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage()}};
-
-  // Simple markdown-ish rendering: bold, inline code, bullet lists
-  const renderContent=(text)=>{
-    const lines=text.split("\n");
-    return lines.map((line,li)=>{
-      if(line.startsWith("- ")||line.startsWith("• "))return<div key={li} style={{paddingLeft:12,position:"relative",marginBottom:2}}><span style={{position:"absolute",left:0}}>•</span>{formatInline(line.replace(/^[-•]\s*/,""))}</div>;
-      if(line.startsWith("**")&&line.endsWith("**"))return<div key={li} style={{fontWeight:600,marginTop:li>0?8:0,marginBottom:2}}>{line.replace(/\*\*/g,"")}</div>;
-      if(line.trim()==="")return<div key={li} style={{height:6}}/>;
-      return<div key={li}>{formatInline(line)}</div>;
-    });
-  };
-  const formatInline=(text)=>{
-    const parts=text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
-    return parts.map((p,i)=>{
-      if(p.startsWith("`")&&p.endsWith("`"))return<code key={i} style={{background:"rgba(99,102,241,0.15)",padding:"1px 5px",borderRadius:4,fontSize:12,fontFamily:"'JetBrains Mono',monospace"}}>{p.slice(1,-1)}</code>;
-      if(p.startsWith("**")&&p.endsWith("**"))return<strong key={i}>{p.slice(2,-2)}</strong>;
-      return p;
-    });
-  };
-
-  const suggestions=["What's my most profitable category?","Which items should I reprice?","Summarize my business performance","What should I source next?"];
-
-  return(
-    <>
-      <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",backdropFilter:"blur(2px)",zIndex:90,opacity:open?1:0,pointerEvents:open?"auto":"none",transition:"opacity 0.25s"}}/>
-      <div style={{position:"fixed",right:0,top:0,bottom:0,width:420,maxWidth:"100vw",background:"#0D0F14",borderLeft:"1px solid #1E2330",zIndex:91,transform:open?"translateX(0)":"translateX(100%)",transition:"transform 0.3s cubic-bezier(0.4,0,0.2,1)",display:"flex",flexDirection:"column"}}>
-        {/* Header */}
-        <div style={{padding:"16px 20px",borderBottom:"1px solid #1E2330",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:32,height:32,borderRadius:8,background:"linear-gradient(135deg,#D97706,#F59E0B)",display:"flex",alignItems:"center",justifyContent:"center"}}>{icon(I.ai,18)}</div>
-            <div><div style={{fontSize:14,fontWeight:600}}>Claude AI</div><div style={{fontSize:11,color:"#5A6478"}}>Business Assistant</div></div>
-          </div>
-          <button onClick={onClose} style={{width:32,height:32,borderRadius:8,border:"1px solid #1E2330",background:"transparent",color:"#8B95A9",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>{icon(I.x,16)}</button>
-        </div>
-
-        {/* Messages */}
-        <div ref={scrollRef} style={{flex:1,overflowY:"auto",padding:16,display:"flex",flexDirection:"column",gap:12}}>
-          {messages.length===0&&!loading&&(
-            <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,padding:20}}>
-              <div style={{width:48,height:48,borderRadius:12,background:"linear-gradient(135deg,#D97706,#F59E0B)",display:"flex",alignItems:"center",justifyContent:"center",opacity:0.8}}>{icon(I.ai,26)}</div>
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:15,fontWeight:600,marginBottom:4}}>Hey! I'm your EVX assistant</div>
-                <div style={{fontSize:12,color:"#5A6478",lineHeight:1.5}}>Ask me anything about your inventory, pricing strategy, business performance, or sourcing.</div>
-              </div>
-              <div style={{display:"flex",flexDirection:"column",gap:6,width:"100%",marginTop:8}}>
-                {suggestions.map((s,i)=>(
-                  <button key={i} onClick={()=>{setInput(s);setTimeout(()=>inputRef.current?.focus(),50)}} style={{padding:"10px 14px",borderRadius:8,border:"1px solid #1E2330",background:"rgba(255,255,255,0.02)",color:"#8B95A9",fontSize:12,cursor:"pointer",textAlign:"left",fontFamily:"'DM Sans',sans-serif",transition:"all 0.15s"}}
-                    onMouseEnter={e=>{e.target.style.borderColor="rgba(99,102,241,0.4)";e.target.style.color="#E8ECF4"}}
-                    onMouseLeave={e=>{e.target.style.borderColor="#1E2330";e.target.style.color="#8B95A9"}}
-                  >{s}</button>
-                ))}
-              </div>
-            </div>
-          )}
-          {messages.map((m,i)=>(
-            <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
-              <div style={{maxWidth:"85%",padding:"10px 14px",borderRadius:m.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px",background:m.role==="user"?"#6366F1":"#171B24",border:m.role==="user"?"none":"1px solid #1E2330",fontSize:13,lineHeight:1.6,wordBreak:"break-word"}}>
-                {m.role==="assistant"?renderContent(m.content):m.content}
-              </div>
-            </div>
-          ))}
-          {loading&&(
-            <div style={{display:"flex",justifyContent:"flex-start"}}>
-              <div style={{padding:"12px 18px",borderRadius:"14px 14px 14px 4px",background:"#171B24",border:"1px solid #1E2330",display:"flex",gap:4,alignItems:"center"}}>
-                <span style={{width:6,height:6,borderRadius:"50%",background:"#6366F1",animation:"pulse 1.2s ease infinite"}}/>
-                <span style={{width:6,height:6,borderRadius:"50%",background:"#6366F1",animation:"pulse 1.2s ease 0.2s infinite"}}/>
-                <span style={{width:6,height:6,borderRadius:"50%",background:"#6366F1",animation:"pulse 1.2s ease 0.4s infinite"}}/>
-              </div>
-            </div>
-          )}
-          {error&&(
-            <div style={{padding:"10px 14px",borderRadius:10,background:"rgba(244,63,94,0.08)",border:"1px solid rgba(244,63,94,0.2)",fontSize:12,color:"#F87171"}}>{error}</div>
-          )}
-        </div>
-
-        {/* Input */}
-        <div style={{padding:"12px 16px",borderTop:"1px solid #1E2330",flexShrink:0}}>
-          <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
-            <textarea ref={inputRef} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder="Ask about your business..." rows={1} style={{...IS,resize:"none",minHeight:40,maxHeight:120,lineHeight:1.5,flex:1}}
-              onInput={e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,120)+"px"}}/>
-            <button onClick={sendMessage} disabled={!input.trim()||loading} style={{width:40,height:40,borderRadius:8,border:"none",background:input.trim()&&!loading?"#6366F1":"#1E2330",color:input.trim()&&!loading?"#fff":"#5A6478",cursor:input.trim()&&!loading?"pointer":"default",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>{icon(I.send,16)}</button>
-          </div>
-          <div style={{fontSize:10,color:"#3A4152",marginTop:6,textAlign:"center"}}>Powered by Claude · Your data stays in this session</div>
-        </div>
-      </div>
-    </>
-  );
-}
-
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
 export default function App(){
   const[page,setPage]=useState("dashboard");
   const[sidebarOpen,setSidebarOpen]=useState(false);
-  const[chatOpen,setChatOpen]=useState(false);
   const[toastMsg,setToastMsg]=useState(null);
   const toast=(m,t,onUndo)=>setToastMsg({message:m,type:t,onUndo});
   const storageError=useCallback((m)=>toast(m,"error"),[]);
@@ -1609,9 +1448,7 @@ export default function App(){
   return(
     <div className="eve-root" style={{display:"flex",height:"100vh",overflow:"hidden",background:"#0A0C10",color:"#E8ECF4",fontFamily:"'DM Sans',sans-serif"}}>
       <style>{`
-        @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
-        @keyframes pulse{0%,100%{opacity:0.3;transform:scale(0.8)}50%{opacity:1;transform:scale(1)}}
-        input[type=checkbox]{width:16px;height:16px;cursor:pointer}
+        @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}        input[type=checkbox]{width:16px;height:16px;cursor:pointer}
         .eve-hamburger{display:none}
         .eve-sidebar-overlay{display:none}
         .eve-sidebar{width:220px;min-width:220px}
@@ -1679,7 +1516,6 @@ export default function App(){
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
             {alertCount>0&&<button onClick={()=>{setPage("alerts");setSidebarOpen(false)}} style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(245,158,11,0.3)",background:"rgba(245,158,11,0.08)",color:"#FBBF24",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:6}}>{icon(I.warn,14)}{alertCount} alert{alertCount!==1?"s":""}</button>}
-            <button onClick={()=>setChatOpen(true)} style={{padding:"6px 14px",borderRadius:7,border:"1px solid rgba(217,119,6,0.3)",background:"linear-gradient(135deg,rgba(217,119,6,0.12),rgba(245,158,11,0.08))",color:"#FBBF24",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:6,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.borderColor="rgba(217,119,6,0.6)"} onMouseLeave={e=>e.currentTarget.style.borderColor="rgba(217,119,6,0.3)"}>{icon(I.ai,14)}Ask AI</button>
           </div>
         </div>
         <div style={{flex:1,overflowY:"auto",overflowX:"hidden"}}>
@@ -1696,8 +1532,6 @@ export default function App(){
         </div>
       </div>
 
-      {/* AI Chat Sidebar */}
-      <ChatSidebar open={chatOpen} onClose={()=>setChatOpen(false)} items={items} expenses={expenses} shipments={shipments} pos={pos} customers={customers}/>
     </div>
   );
 }
