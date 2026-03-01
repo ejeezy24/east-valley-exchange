@@ -402,14 +402,32 @@ function exportCSV(items){
   URL.revokeObjectURL(url);
 }
 
+function parseCSVLine(line){
+  const vals=[];let cur="";let inQuote=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(inQuote){
+      if(ch==='"'&&line[i+1]==='"'){cur+='"';i++}  // escaped quote ""
+      else if(ch==='"'){inQuote=false}
+      else{cur+=ch}
+    }else{
+      if(ch==='"'){inQuote=true}
+      else if(ch===','){vals.push(cur.trim());cur=""}
+      else{cur+=ch}
+    }
+  }
+  vals.push(cur.trim());
+  return vals;
+}
+
 function parseCSV(text){
-  const lines=text.split("\n").filter(l=>l.trim());
+  const lines=text.split(/\r?\n/).filter(l=>l.trim());
   if(lines.length<2)return[];
-  const headers=lines[0].split(",").map(h=>h.trim().replace(/"/g,""));
+  const headers=parseCSVLine(lines[0]).map(h=>h.replace(/^"|"$/g,"").trim());
   return lines.slice(1).map(line=>{
-    const vals=line.match(/(".*?"|[^,]*)/g)||[];
+    const vals=parseCSVLine(line);
     const obj={};
-    headers.forEach((h,i)=>{obj[h]=(vals[i]||"").replace(/^"|"$/g,"").trim()});
+    headers.forEach((h,i)=>{obj[h]=(vals[i]||"").replace(/^"|"$/g,"")});
     return{id:obj.id||uid(),name:obj.name||"Unnamed",sku:obj.sku||"",barcode:obj.barcode||"",category:CATEGORIES.includes(obj.category)?obj.category:"Other",condition:CONDITIONS.includes(obj.condition)?obj.condition:"Good",status:ITEM_STATUSES.includes(obj.status)?obj.status:"Received",channel:obj.channel||"",cost:Number(obj.cost)||0,price:Number(obj.price)||0,source:obj.source||"Other",received:obj.received||td(),soldDate:obj.soldDate||"",notes:obj.notes||"",customerId:"",history:[{date:td(),action:"Imported",note:"Imported via CSV"}]};
   });
 }
