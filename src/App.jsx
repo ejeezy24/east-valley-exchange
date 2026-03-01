@@ -30,6 +30,9 @@ const EXPENSE_CATEGORIES = ["Shipping & Postage","Platform Fees","Packaging & Su
 const CARRIERS = ["USPS","UPS","FedEx","DHL","Amazon Logistics","OnTrac","Other"];
 const SHIPMENT_STATUSES = ["Pending","Label Created","Picked Up","In Transit","Out for Delivery","Delivered","Exception"];
 
+// Industry-standard liquidation recovery rates (% of retail price)
+const RECOVERY_RATES = {"Electronics":35,"Home & Kitchen":30,"Apparel & Shoes":25,"Toys & Games":35,"Sports & Outdoors":30,"Beauty & Health":28,"Tools & Hardware":32,"Automotive":30,"Books & Media":20,"Other":25};
+
 const uid = () => "EVE-" + Math.floor(1000 + Math.random() * 9000);
 const poUid = () => "PO-" + String(Math.floor(100 + Math.random() * 900)).padStart(4,"0");
 const expUid = () => "EXP-" + Math.floor(1000 + Math.random() * 9000);
@@ -474,7 +477,7 @@ function detectManifestMapping(headers){
 
 function parseCSV(text){
   const lines=text.split(/\r?\n/).filter(l=>l.trim());
-  if(lines.length<2)return[];
+  if(lines.length<2)return{items:[],isManifest:false};
   const headers=parseCSVLine(lines[0]).map(h=>h.replace(/^"|"$/g,"").trim());
   const mapping=detectManifestMapping(headers);
 
@@ -504,16 +507,17 @@ function parseCSV(text){
         items.push({id:uid(),name:name,sku:sku,barcode:"",category,condition,status:"Received",channel:"",cost:0,price:unitRetail,source:"Other",received:td(),soldDate:"",notes,customerId:"",history:[{date:td(),action:"Imported",note:`Imported from manifest${lotId?` (Lot ${lotId})`:""}`}]});
       }
     });
-    return items;
+    return{items,isManifest:true};
   }
 
   // Standard EVE export format
-  return lines.slice(1).map(line=>{
+  const items=lines.slice(1).map(line=>{
     const vals=parseCSVLine(line);
     const obj={};
     headers.forEach((h,i)=>{obj[h]=(vals[i]||"").replace(/^"|"$/g,"")});
     return{id:obj.id||uid(),name:obj.name||"Unnamed",sku:obj.sku||"",barcode:obj.barcode||"",category:CATEGORIES.includes(obj.category)?obj.category:"Other",condition:CONDITIONS.includes(obj.condition)?obj.condition:"Good",status:ITEM_STATUSES.includes(obj.status)?obj.status:"Received",channel:obj.channel||"",cost:Number(obj.cost)||0,price:Number(obj.price)||0,source:obj.source||"Other",received:obj.received||td(),soldDate:obj.soldDate||"",notes:obj.notes||"",customerId:"",history:[{date:td(),action:"Imported",note:"Imported via CSV"}]};
   });
+  return{items,isManifest:false};
 }
 
 // ─── REPORT EXPORT UTILITIES ────────────────────────────────────────────────
@@ -671,6 +675,138 @@ function DashboardPage({items,expenses,setPage}){
   );
 }
 
+// ─── MANIFEST VALUATION PREVIEW ─────────────────────────────────────────────
+function ManifestPreviewModal({open,onClose,onConfirm,parsedItems}){
+  const[rates,setRates]=useState(()=>({...RECOVERY_RATES}));
+  const[palletCost,setPalletCost]=useState("");
+
+  // Reset when new items come in
+  useEffect(()=>{if(open){setRates({...RECOVERY_RATES});setPalletCost("")}},[open]);
+
+  if(!open||!parsedItems||parsedItems.length===0)return null;
+
+  // Category breakdown
+  const catBreak={};
+  parsedItems.forEach(i=>{
+    if(!catBreak[i.category])catBreak[i.category]={count:0,retail:0};
+    catBreak[i.category].count++;
+    catBreak[i.category].retail+=(i.price||0);
+  });
+  const catEntries=Object.entries(catBreak).sort((a,b)=>b[1].count-a[1].count);
+
+  const totalItems=parsedItems.length;
+  const totalRetail=parsedItems.reduce((s,i)=>s+(i.price||0),0);
+  const estResale=parsedItems.reduce((s,i)=>s+(i.price||0)*(rates[i.category]||25)/100,0);
+  const cost=Number(palletCost)||0;
+  const estProfit=estResale-cost;
+
+  // Deduplicate items by name for preview (show unique product lines with qty)
+  const uniqueItems={};
+  parsedItems.forEach(i=>{
+    const key=i.name+"|"+i.condition;
+    if(!uniqueItems[key])uniqueItems[key]={...i,qty:0};
+    uniqueItems[key].qty++;
+  });
+  const previewItems=Object.values(uniqueItems).sort((a,b)=>(b.price*b.qty)-(a.price*a.qty));
+
+  const handleConfirm=()=>{
+    // Distribute pallet cost evenly across all items
+    const perItemCost=cost>0?cost/totalItems:0;
+    const finalItems=parsedItems.map(i=>({...i,cost:Math.round(perItemCost*100)/100}));
+    onConfirm(finalItems);
+  };
+
+  return(
+    <Modal open={open} onClose={onClose} title="Manifest Valuation" width={720}>
+      {/* Summary Cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
+        {[
+          {label:"Total Units",value:totalItems,color:"#6366F1"},
+          {label:"Total Retail",value:fmt(totalRetail),color:"#8B95A9"},
+          {label:"Est. Resale",value:fmt(estResale),color:"#10B981"},
+          {label:"Est. Profit",value:cost>0?fmt(estProfit):"—",color:estProfit>=0?"#10B981":"#F43F5E"},
+        ].map((s,i)=>(
+          <div key={i} style={{background:"#0D0F14",borderRadius:10,padding:"12px 14px",position:"relative",overflow:"hidden"}}>
+            <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(90deg,${s.color},transparent)`}}/>
+            <div style={{fontSize:11,color:"#5A6478",marginBottom:2}}>{s.label}</div>
+            <div style={{fontSize:20,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",letterSpacing:-0.5,color:s.color}}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Pallet Cost Input */}
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,padding:"12px 16px",background:"#0D0F14",borderRadius:10,border:"1px solid #1E2330"}}>
+        <label style={{fontSize:13,fontWeight:500,color:"#8B95A9",whiteSpace:"nowrap"}}>Your pallet cost:</label>
+        <div style={{position:"relative",flex:1,maxWidth:180}}>
+          <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",color:"#5A6478",fontSize:13}}>$</span>
+          <input type="number" value={palletCost} onChange={e=>setPalletCost(e.target.value)} placeholder="0.00" style={{...IS,paddingLeft:24,fontFamily:"'JetBrains Mono',monospace"}}/>
+        </div>
+        {cost>0&&<span style={{fontSize:12,color:estProfit>=0?"#34D399":"#F87171",fontWeight:600}}>{estProfit>=0?"+":""}{fmt(estProfit)} est. profit ({totalRetail>0?((estResale/totalRetail)*100).toFixed(0):0}% recovery)</span>}
+      </div>
+
+      {/* Category Breakdown */}
+      <div style={{marginBottom:16}}>
+        <div style={{fontSize:12,fontWeight:600,color:"#8B95A9",marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>Recovery Rate by Category</div>
+        <div style={{background:"#0D0F14",borderRadius:10,border:"1px solid #1E2330",overflow:"hidden"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead><tr style={{borderBottom:"1px solid #1E2330"}}>
+              <th style={{textAlign:"left",padding:"8px 12px",color:"#5A6478",fontWeight:500}}>Category</th>
+              <th style={{textAlign:"center",padding:"8px 12px",color:"#5A6478",fontWeight:500}}>Items</th>
+              <th style={{textAlign:"right",padding:"8px 12px",color:"#5A6478",fontWeight:500}}>Retail</th>
+              <th style={{textAlign:"center",padding:"8px 12px",color:"#5A6478",fontWeight:500,width:90}}>Recovery %</th>
+              <th style={{textAlign:"right",padding:"8px 12px",color:"#5A6478",fontWeight:500}}>Est. Resale</th>
+            </tr></thead>
+            <tbody>{catEntries.map(([cat,d])=>{
+              const catResale=d.retail*(rates[cat]||25)/100;
+              return(<tr key={cat} style={{borderBottom:"1px solid #1E2330"}}>
+                <td style={{padding:"8px 12px",fontWeight:500}}>{cat}</td>
+                <td style={{padding:"8px 12px",textAlign:"center",color:"#8B95A9"}}>{d.count}</td>
+                <td style={{padding:"8px 12px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#8B95A9"}}>{fmt(d.retail)}</td>
+                <td style={{padding:"6px 8px",textAlign:"center"}}>
+                  <input type="number" min="0" max="100" value={rates[cat]||25} onChange={e=>setRates(r=>({...r,[cat]:Number(e.target.value)||0}))} style={{...IS,width:56,textAlign:"center",padding:"4px 6px",fontSize:12,fontFamily:"'JetBrains Mono',monospace"}}/>
+                </td>
+                <td style={{padding:"8px 12px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#34D399",fontWeight:500}}>{fmt(catResale)}</td>
+              </tr>);
+            })}</tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Item Preview */}
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:12,fontWeight:600,color:"#8B95A9",marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>Item Preview ({previewItems.length} unique product{previewItems.length!==1?"s":""})</div>
+        <div style={{background:"#0D0F14",borderRadius:10,border:"1px solid #1E2330",overflow:"hidden",maxHeight:200,overflowY:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead style={{position:"sticky",top:0,background:"#0D0F14",zIndex:1}}><tr style={{borderBottom:"1px solid #1E2330"}}>
+              <th style={{textAlign:"left",padding:"8px 12px",color:"#5A6478",fontWeight:500}}>Product</th>
+              <th style={{textAlign:"center",padding:"8px 12px",color:"#5A6478",fontWeight:500}}>Qty</th>
+              <th style={{textAlign:"center",padding:"8px 12px",color:"#5A6478",fontWeight:500}}>Condition</th>
+              <th style={{textAlign:"right",padding:"8px 12px",color:"#5A6478",fontWeight:500}}>Retail</th>
+              <th style={{textAlign:"right",padding:"8px 12px",color:"#5A6478",fontWeight:500}}>Est. Resale</th>
+            </tr></thead>
+            <tbody>{previewItems.map((item,idx)=>{
+              const resaleEach=(item.price||0)*(rates[item.category]||25)/100;
+              return(<tr key={idx} style={{borderBottom:"1px solid #1E2330"}}>
+                <td style={{padding:"8px 12px",fontWeight:500,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</td>
+                <td style={{padding:"8px 12px",textAlign:"center",color:"#8B95A9"}}>{item.qty}</td>
+                <td style={{padding:"8px 12px",textAlign:"center"}}><StatusBadge status={item.condition}/></td>
+                <td style={{padding:"8px 12px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#8B95A9"}}>{fmt(item.price)}</td>
+                <td style={{padding:"8px 12px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#34D399",fontWeight:500}}>{fmt(resaleEach)}</td>
+              </tr>);
+            })}</tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+        <button onClick={onClose} style={BTN(false)}>Cancel</button>
+        <button onClick={handleConfirm} style={BTN(true)}>{icon(I.check,16)}Import {totalItems} Items</button>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── INVENTORY PAGE ──────────────────────────────────────────────────────────
 function InventoryPage({items,saveItems,toast}){
   const[search,setSearch]=useState("");
@@ -682,6 +818,7 @@ function InventoryPage({items,saveItems,toast}){
   const[detailItem,setDetailItem]=useState(null);
   const[selected,setSelected]=useState(new Set());
   const[bulkAction,setBulkAction]=useState("");
+  const[manifestPreview,setManifestPreview]=useState(null);
   const fileRef=useRef();
 
   const filtered=items.filter(i=>{
@@ -722,8 +859,25 @@ function InventoryPage({items,saveItems,toast}){
   const handleCSVImport=(e)=>{
     const file=e.target.files[0];if(!file)return;
     const reader=new FileReader();
-    reader.onload=(ev)=>{const imported=parseCSV(ev.target.result);if(imported.length>0){saveItems([...imported,...items]);toast(`Imported ${imported.length} items`,"success")}else toast("No valid items found","error")};
+    reader.onload=(ev)=>{
+      const result=parseCSV(ev.target.result);
+      if(result.items.length===0){toast("No valid items found","error");return}
+      if(result.isManifest){
+        // Show valuation preview for manifest imports
+        setManifestPreview(result.items);
+      }else{
+        // Standard EVE export — import directly
+        saveItems([...result.items,...items]);
+        toast(`Imported ${result.items.length} items`,"success");
+      }
+    };
     reader.readAsText(file);e.target.value="";
+  };
+
+  const handleManifestConfirm=(finalItems)=>{
+    saveItems([...finalItems,...items]);
+    toast(`Imported ${finalItems.length} items from manifest`,"success");
+    setManifestPreview(null);
   };
 
   return(
@@ -731,6 +885,7 @@ function InventoryPage({items,saveItems,toast}){
       <ItemFormModal open={showForm} onClose={()=>{setShowForm(false);setEditItem(null)}} onSave={handleSave} item={editItem}/>
       <ItemDetailModal open={!!detailItem} onClose={()=>setDetailItem(null)} item={detailItem} customers={[]}/>
       <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{const deleted=items.find(i=>i.id===deleteId);const prev=[...items];saveItems(items.filter(i=>i.id!==deleteId));setDeleteId(null);toast("Item deleted","success",deleted?()=>saveItems(prev):undefined)}} message="Delete this item permanently?"/>
+      <ManifestPreviewModal open={!!manifestPreview} onClose={()=>setManifestPreview(null)} onConfirm={handleManifestConfirm} parsedItems={manifestPreview}/>
       <input ref={fileRef} type="file" accept=".csv" onChange={handleCSVImport} style={{display:"none"}}/>
 
       {/* Toolbar */}
