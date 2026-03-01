@@ -141,7 +141,7 @@ const IS={width:"100%",background:"#0D0F14",border:"1px solid #1E2330",borderRad
 const SS={...IS,appearance:"none",backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235A6478' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,backgroundRepeat:"no-repeat",backgroundPosition:"right 12px center",paddingRight:32};
 const BTN=(primary)=>({padding:"9px 20px",borderRadius:8,border:primary?"none":"1px solid #1E2330",background:primary?"#6366F1":"transparent",color:primary?"#fff":"#8B95A9",fontSize:13,fontWeight:primary?600:500,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:6});
 
-const Toast=({message,type,onClose})=>{useEffect(()=>{const t=setTimeout(onClose,3000);return()=>clearTimeout(t)},[onClose]);const bg=type==="success"?"#10B981":type==="error"?"#F43F5E":"#6366F1";return(<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"#171B24",border:`1px solid ${bg}40`,borderRadius:12,padding:"12px 20px",display:"flex",alignItems:"center",gap:10,boxShadow:`0 8px 32px ${bg}20`,animation:"slideUp 0.3s ease"}}><span style={{fontSize:13,fontWeight:500}}>{message}</span></div>)};
+const Toast=({message,type,onClose,onUndo})=>{useEffect(()=>{const t=setTimeout(onClose,onUndo?5000:3000);return()=>clearTimeout(t)},[onClose,onUndo]);const bg=type==="success"?"#10B981":type==="error"?"#F43F5E":"#6366F1";return(<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"#171B24",border:`1px solid ${bg}40`,borderRadius:12,padding:"12px 20px",display:"flex",alignItems:"center",gap:12,boxShadow:`0 8px 32px ${bg}20`,animation:"slideUp 0.3s ease"}}><span style={{fontSize:13,fontWeight:500}}>{message}</span>{onUndo&&<button onClick={()=>{onUndo();onClose()}} style={{background:"transparent",border:"1px solid rgba(255,255,255,0.15)",borderRadius:6,color:"#E8ECF4",fontSize:12,fontWeight:600,cursor:"pointer",padding:"3px 10px",fontFamily:"'DM Sans',sans-serif"}}>Undo</button>}</div>)};
 
 // ─── STORAGE ─────────────────────────────────────────────────────────────────
 function useStorage(key,def,onError){
@@ -648,7 +648,7 @@ function InventoryPage({items,saveItems,toast}){
     <div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:16}}>
       <ItemFormModal open={showForm} onClose={()=>{setShowForm(false);setEditItem(null)}} onSave={handleSave} item={editItem}/>
       <ItemDetailModal open={!!detailItem} onClose={()=>setDetailItem(null)} item={detailItem} customers={[]}/>
-      <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{saveItems(items.filter(i=>i.id!==deleteId));setDeleteId(null);toast("Deleted","success")}} message="Delete this item permanently?"/>
+      <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{const deleted=items.find(i=>i.id===deleteId);const prev=[...items];saveItems(items.filter(i=>i.id!==deleteId));setDeleteId(null);toast("Item deleted","success",deleted?()=>saveItems(prev):undefined)}} message="Delete this item permanently?"/>
       <input ref={fileRef} type="file" accept=".csv" onChange={handleCSVImport} style={{display:"none"}}/>
 
       {/* Toolbar */}
@@ -763,7 +763,7 @@ function PurchasingPage({pos,savePOs,toast}){
 
   return(<div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:20}}>
     <POFormModal open={showForm} onClose={()=>{setShowForm(false);setEditPO(null)}} onSave={(po)=>{const idx=pos.findIndex(p=>p.id===po.id);const n=[...pos];if(idx>=0)n[idx]=po;else n.unshift(po);savePOs(n);toast(idx>=0?"PO updated":"PO created","success")}} po={editPO}/>
-    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{savePOs(pos.filter(p=>p.id!==deleteId));setDeleteId(null);toast("Deleted","success")}} message="Delete this PO?"/>
+    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{const prev=[...pos];savePOs(pos.filter(p=>p.id!==deleteId));setDeleteId(null);toast("PO deleted","success",()=>savePOs(prev))}} message="Delete this PO?"/>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
       <div className="eve-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,flex:1,marginRight:16}}>
         {[{label:"Active POs",value:pos.filter(p=>!["Complete"].includes(p.status)).length,accent:"#6366F1"},{label:"Total Units",value:totalUnits.toLocaleString(),accent:"#F59E0B"},{label:"Total Spend",value:fmt(totalSpend),accent:"#EC4899"},{label:"Avg Cost/Unit",value:totalUnits>0?fmt(totalSpend/totalUnits):"—",accent:"#10B981"}].map((s,i)=>(
@@ -1039,7 +1039,7 @@ function ExpensesPage({expenses,saveExpenses,toast}){
 
   return(<div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:20}}>
     <ExpenseFormModal open={showForm} onClose={()=>{setShowForm(false);setEditExp(null)}} onSave={(exp)=>{const idx=expenses.findIndex(e=>e.id===exp.id);const n=[...expenses];if(idx>=0)n[idx]=exp;else n.unshift(exp);saveExpenses(n);toast(idx>=0?"Updated":"Expense added","success")}} expense={editExp}/>
-    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{saveExpenses(expenses.filter(e=>e.id!==deleteId));setDeleteId(null);toast("Deleted","success")}} message="Delete this expense?"/>
+    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{const prev=[...expenses];saveExpenses(expenses.filter(e=>e.id!==deleteId));setDeleteId(null);toast("Expense deleted","success",()=>saveExpenses(prev))}} message="Delete this expense?"/>
 
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
       <div className="eve-grid-3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,flex:1,marginRight:16}}>
@@ -1083,7 +1083,7 @@ function CustomersPage({customers,saveCustomers,items,toast}){
 
   return(<div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:20}}>
     <CustomerFormModal open={showForm} onClose={()=>{setShowForm(false);setEditCust(null)}} onSave={(c)=>{const idx=customers.findIndex(x=>x.id===c.id);const n=[...customers];if(idx>=0)n[idx]=c;else n.unshift(c);saveCustomers(n);toast(idx>=0?"Updated":"Customer added","success")}} customer={editCust}/>
-    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{saveCustomers(customers.filter(c=>c.id!==deleteId));setDeleteId(null);toast("Deleted","success")}} message="Delete this customer?"/>
+    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{const prev=[...customers];saveCustomers(customers.filter(c=>c.id!==deleteId));setDeleteId(null);toast("Customer deleted","success",()=>saveCustomers(prev))}} message="Delete this customer?"/>
 
     <div style={{display:"flex",gap:10,alignItems:"center"}}>
       <div style={{position:"relative",flex:1,maxWidth:320}}><span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#5A6478"}}>{icon(I.search,16)}</span><input type="text" placeholder="Search customers..." value={search} onChange={e=>setSearch(e.target.value)} style={{...IS,paddingLeft:36}}/></div>
@@ -1175,7 +1175,7 @@ function ShippingPage({shipments,saveShipments,items,customers,toast}){
 
   return(<div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:20}}>
     <ShipmentFormModal open={showForm} onClose={()=>{setShowForm(false);setEditShip(null)}} onSave={(sh)=>{const idx=shipments.findIndex(s=>s.id===sh.id);const n=[...shipments];if(idx>=0)n[idx]=sh;else n.unshift(sh);saveShipments(n);toast(idx>=0?"Updated":"Shipment created","success")}} shipment={editShip} items={items} customers={customers}/>
-    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{saveShipments(shipments.filter(s=>s.id!==deleteId));setDeleteId(null);toast("Deleted","success")}} message="Delete this shipment?"/>
+    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{const prev=[...shipments];saveShipments(shipments.filter(s=>s.id!==deleteId));setDeleteId(null);toast("Shipment deleted","success",()=>saveShipments(prev))}} message="Delete this shipment?"/>
 
     <div className="eve-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16}}>
       {[{label:"Total Shipments",value:shipments.length,accent:"#6366F1"},{label:"In Transit",value:inTransit.length,accent:"#F59E0B"},{label:"Awaiting Shipment",value:awaitingShipment.length,accent:awaitingShipment.length>0?"#F43F5E":"#10B981"},{label:"Shipping Costs",value:fmt(totalShipCost),accent:"#EC4899"}].map((s,i)=>(
@@ -1337,7 +1337,7 @@ export default function App(){
   const[page,setPage]=useState("dashboard");
   const[sidebarOpen,setSidebarOpen]=useState(false);
   const[toastMsg,setToastMsg]=useState(null);
-  const toast=(m,t)=>setToastMsg({message:m,type:t});
+  const toast=(m,t,onUndo)=>setToastMsg({message:m,type:t,onUndo});
   const storageError=useCallback((m)=>toast(m,"error"),[]);
   const[items,saveItems,il]=useStorage("eve-items-v2",DEFAULT_ITEMS,storageError);
   const[pos,savePOs,pl]=useStorage("eve-pos-v2",DEFAULT_POS,storageError);
@@ -1401,7 +1401,7 @@ export default function App(){
           .eve-table-wrap{font-size:12px!important}
         }
       `}</style>
-      {toastMsg&&<Toast message={toastMsg.message} type={toastMsg.type} onClose={()=>setToastMsg(null)}/>}
+      {toastMsg&&<Toast message={toastMsg.message} type={toastMsg.type} onUndo={toastMsg.onUndo} onClose={()=>setToastMsg(null)}/>}
 
       {/* Sidebar Overlay */}
       <div className={`eve-sidebar-overlay${sidebarOpen?" open":""}`} onClick={()=>setSidebarOpen(false)}/>
