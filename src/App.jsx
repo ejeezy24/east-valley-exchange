@@ -428,10 +428,86 @@ function parseCSVLine(line){
   return vals;
 }
 
+// Map manifest condition strings to app conditions
+function mapCondition(raw){
+  if(!raw)return "Good";
+  const s=raw.toUpperCase().replace(/[_-]/g," ").trim();
+  const map={"NEW":"New - Sealed","NEW SEALED":"New - Sealed","BRAND NEW":"New - Sealed","NEW WITH TAGS":"New w/ Tags","NWT":"New w/ Tags","NEW W TAGS":"New w/ Tags","NEW OPEN BOX":"New - Open Box","OPEN BOX":"New - Open Box","LIKE NEW":"Like New","USED LIKE NEW":"Like New","USED VERY GOOD":"Like New","USED GOOD":"Good","GOOD":"Good","USED FAIR":"Fair","FAIR":"Fair","USED ACCEPTABLE":"Fair","ACCEPTABLE":"Fair","REFURBISHED":"Refurbished","RENEWED":"Refurbished","SALVAGE":"For Parts","FOR PARTS":"For Parts","DAMAGED":"For Parts"};
+  return map[s]||CONDITIONS.find(c=>c.toUpperCase()===s)||"Good";
+}
+
+// Map manifest category strings to app categories
+function mapCategory(raw){
+  if(!raw)return "Other";
+  const s=raw.toUpperCase().replace(/[_-]/g," ").trim();
+  if(/ELECTRON|COMPUTER|PHONE|TABLET|TV|AUDIO|CAMERA|GAMING/.test(s))return "Electronics";
+  if(/KITCHEN|HOME|HOUSEWARES|APPLIANCE|FURNITURE|BEDDING|BATH|DECOR/.test(s))return "Home & Kitchen";
+  if(/APPAREL|CLOTH|SHOES|FOOTWEAR|FASHION|ACCESSORI/.test(s))return "Apparel & Shoes";
+  if(/TOY|GAME|PUZZLE|LEGO/.test(s))return "Toys & Games";
+  if(/SPORT|OUTDOOR|FITNESS|EXERCISE|CAMPING|GARDEN|PATIO/.test(s))return "Sports & Outdoors";
+  if(/BEAUTY|HEALTH|PERSONAL|COSMETIC|GROOMING/.test(s))return "Beauty & Health";
+  if(/TOOL|HARDWARE|POWER TOOL/.test(s))return "Tools & Hardware";
+  if(/AUTO|VEHICLE|CAR/.test(s))return "Automotive";
+  if(/BOOK|MEDIA|DVD|MUSIC|MOVIE/.test(s))return "Books & Media";
+  return "Other";
+}
+
+// Detect if headers are from a manifest format (BStock, Amazon, liquidation.com, etc.) vs app's own export
+function detectManifestMapping(headers){
+  const upper=headers.map(h=>h.toUpperCase().replace(/[_\-.\s]+/g," ").trim());
+  // BStock / liquidation manifest columns
+  const nameCol=upper.findIndex(h=>/^ITEM DESC|^DESCRIPTION|^PRODUCT NAME|^TITLE|^ITEM NAME|^PRODUCT$/.test(h));
+  const qtyCol=upper.findIndex(h=>/^QTY$|^QUANTITY$|^UNITS$|^COUNT$/.test(h));
+  const unitRetailCol=upper.findIndex(h=>/^UNIT RETAIL|^RETAIL PRICE|^MSRP|^UNIT PRICE$/.test(h));
+  const extRetailCol=upper.findIndex(h=>/^EXT RETAIL|^EXTENDED RETAIL|^TOTAL RETAIL|^EXT PRICE/.test(h));
+  const condCol=upper.findIndex(h=>/^CONDITION$|^ITEM CONDITION$/.test(h));
+  const catCol=upper.findIndex(h=>/^CATEGORY$|^DEPARTMENT$|^DEPT$|^SELLER CATEGORY$|^PRODUCT CATEGORY$/.test(h));
+  const itemNumCol=upper.findIndex(h=>/^ITEM #|^ITEM NUM|^UPC$|^ASIN$|^SKU$|^BARCODE$|^ITEM$/.test(h));
+  const vendorCol=upper.findIndex(h=>/^VENDOR$|^BRAND$|^MANUFACTURER$|^MFG$/.test(h));
+  const lotCol=upper.findIndex(h=>/^LOT ID|^LOT$|^LOT NUM|^MANIFEST/.test(h));
+  // If we found a name/description column that's NOT "name" (our own format), treat as manifest
+  if(nameCol>=0&&headers[nameCol].toLowerCase()!=="name")return{isManifest:true,nameCol,qtyCol,unitRetailCol,extRetailCol,condCol,catCol,itemNumCol,vendorCol,lotCol};
+  // Also detect if first header is "Lot ID" or similar
+  if(lotCol===0)return{isManifest:true,nameCol,qtyCol,unitRetailCol,extRetailCol,condCol,catCol,itemNumCol,vendorCol,lotCol};
+  return{isManifest:false};
+}
+
 function parseCSV(text){
   const lines=text.split(/\r?\n/).filter(l=>l.trim());
   if(lines.length<2)return[];
   const headers=parseCSVLine(lines[0]).map(h=>h.replace(/^"|"$/g,"").trim());
+  const mapping=detectManifestMapping(headers);
+
+  if(mapping.isManifest){
+    // Parse as liquidation manifest — expand quantities into individual items
+    const items=[];
+    lines.slice(1).forEach(line=>{
+      const vals=parseCSVLine(line);
+      const get=(idx)=>idx>=0?(vals[idx]||"").replace(/^"|"$/g,"").trim():"";
+      const name=get(mapping.nameCol)||"Unnamed Item";
+      const qty=Math.max(1,parseInt(get(mapping.qtyCol))||1);
+      const unitRetail=Number(get(mapping.unitRetailCol))||0;
+      const rawCond=get(mapping.condCol);
+      const condition=mapCondition(rawCond);
+      // Try category from the more specific column first, fall back to department
+      let rawCat=get(mapping.catCol);
+      // Also check for a secondary category column (some manifests have both Category and Department)
+      const catIdx2=headers.findIndex((h,i)=>i!==mapping.catCol&&/category|dept|department/i.test(h));
+      if(!rawCat&&catIdx2>=0)rawCat=get(catIdx2);
+      const category=mapCategory(rawCat);
+      const sku=get(mapping.itemNumCol);
+      const vendor=get(mapping.vendorCol);
+      const lotId=get(mapping.lotCol);
+      const notes=[vendor?`Vendor: ${vendor}`:"",lotId?`Lot: ${lotId}`:"",rawCond?`Manifest condition: ${rawCond}`:"",qty>1?`Qty ${qty} from manifest (unit retail: $${unitRetail.toFixed(2)})`:unitRetail?`Retail: $${unitRetail.toFixed(2)}`:""].filter(Boolean).join(" | ");
+
+      for(let q=0;q<qty;q++){
+        items.push({id:uid(),name:name,sku:sku,barcode:"",category,condition,status:"Received",channel:"",cost:0,price:unitRetail,source:"Other",received:td(),soldDate:"",notes,customerId:"",history:[{date:td(),action:"Imported",note:`Imported from manifest${lotId?` (Lot ${lotId})`:""}`}]});
+      }
+    });
+    return items;
+  }
+
+  // Standard EVE export format
   return lines.slice(1).map(line=>{
     const vals=parseCSVLine(line);
     const obj={};
