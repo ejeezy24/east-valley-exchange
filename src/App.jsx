@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
 
 // ─── FONT ────────────────────────────────────────────────────────────────────
@@ -11,6 +11,15 @@ fl.rel = "stylesheet";
 if (!document.querySelector(`link[href="${fl.href}"]`)) document.head.appendChild(fl);
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
+// ─── THRESHOLDS & LIMITS ─────────────────────────────────────────────────────
+const ALERT_LOW_MARGIN_PCT   = 20;   // warn when margin is below this %
+const ALERT_SLOW_MOVER_DAYS  = 10;   // warn when listed longer than this many days
+const ALERT_HIGH_VALUE_COST  = 100;  // warn when item cost exceeds this amount
+const ALERT_LARGE_EXPENSE    = 500;  // warn when a single expense exceeds this amount
+const DASH_RECENT_ITEMS      = 6;    // recent items shown on dashboard
+const TABLE_TOP_PERFORMERS   = 5;    // rows in top-performer tables
+const TABLE_OLDEST_ITEMS     = 10;   // rows in oldest-items aging table
+
 const CATEGORIES = ["Electronics","Home & Kitchen","Apparel & Shoes","Toys & Games","Sports & Outdoors","Beauty & Health","Tools & Hardware","Automotive","Books & Media","Other"];
 const CONDITIONS = ["New - Sealed","New w/ Tags","New - Open Box","Like New","Good","Fair","Refurbished","For Parts"];
 const CHANNELS = ["eBay","Amazon","Direct / Website","Wholesale","Facebook Marketplace","Whatnot","Mercari","OfferUp"];
@@ -29,6 +38,7 @@ const shipUid = () => "SHP-" + Math.floor(1000 + Math.random() * 9000);
 const fmt = (n) => "$" + Number(n||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtK = (n) => n >= 1000 ? "$" + (n/1000).toFixed(1)+"k" : "$"+n;
 const td = () => new Date().toISOString().split("T")[0];
+const safeDate=(s)=>{if(!s)return null;const d=new Date(s);return isNaN(d.getTime())?null:d};
 
 // ─── DEFAULT DATA ────────────────────────────────────────────────────────────
 const DEFAULT_ITEMS = [
@@ -109,6 +119,24 @@ const I={
 };
 const icon = (i,s=18) => <span style={{width:s,height:s,display:"inline-flex",flexShrink:0}}>{i}</span>;
 
+// ─── ERROR BOUNDARY ──────────────────────────────────────────────────────────
+export class ErrorBoundary extends React.Component{
+  constructor(props){super(props);this.state={error:null}}
+  static getDerivedStateFromError(e){return{error:e}}
+  componentDidCatch(e,info){console.error("App error:",e,info)}
+  render(){
+    if(this.state.error)return(
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0A0C10",color:"#E8ECF4",fontFamily:"'DM Sans',sans-serif",gap:16,padding:32,textAlign:"center"}}>
+        <div style={{fontSize:48}}>⚠</div>
+        <h2 style={{fontSize:20,fontWeight:600,margin:0}}>Something went wrong</h2>
+        <p style={{fontSize:13,color:"#8B95A9",margin:0,maxWidth:400}}>{this.state.error.message}</p>
+        <button onClick={()=>this.setState({error:null})} style={{padding:"9px 20px",borderRadius:8,border:"none",background:"#6366F1",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Try again</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 // ─── SHARED COMPONENTS ───────────────────────────────────────────────────────
 const StatusBadge=({status})=>{const c={Listed:["rgba(99,102,241,0.12)","#818CF8"],Active:["rgba(99,102,241,0.12)","#818CF8"],Processing:["rgba(245,158,11,0.12)","#FBBF24"],Grading:["rgba(6,182,212,0.12)","#22D3EE"],Sold:["rgba(16,185,129,0.12)","#34D399"],Shipped:["rgba(16,185,129,0.12)","#34D399"],Complete:["rgba(16,185,129,0.12)","#34D399"],Received:["rgba(99,102,241,0.12)","#818CF8"],"In Transit":["rgba(245,158,11,0.12)","#FBBF24"],Draft:["rgba(255,255,255,0.06)","#8B95A9"],Ordered:["rgba(6,182,212,0.12)","#22D3EE"]};const[bg,fg]=c[status]||["rgba(255,255,255,0.06)","#8B95A9"];return<span style={{background:bg,color:fg,padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:500,whiteSpace:"nowrap"}}>{status}</span>};
 
@@ -116,20 +144,20 @@ const CustomTooltip=({active,payload,label})=>{if(!active||!payload?.length)retu
 
 const Modal=({open,onClose,title,width,children})=>{if(!open)return null;return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",backdropFilter:"blur(4px)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}><div onClick={e=>e.stopPropagation()} style={{background:"#171B24",border:"1px solid #262D3D",borderRadius:16,width:width||520,maxHeight:"90vh",overflow:"auto",boxShadow:"0 24px 64px rgba(0,0,0,0.5)"}}><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 24px",borderBottom:"1px solid #1E2330",position:"sticky",top:0,background:"#171B24",borderRadius:"16px 16px 0 0",zIndex:2}}><h2 style={{fontSize:16,fontWeight:600,margin:0}}>{title}</h2><button onClick={onClose} style={{width:32,height:32,borderRadius:8,border:"1px solid #1E2330",background:"transparent",color:"#8B95A9",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>{icon(I.x,16)}</button></div><div style={{padding:24}}>{children}</div></div></div>)};
 
-const Field=({label,children,required})=>(<div style={{display:"flex",flexDirection:"column",gap:6}}><label style={{fontSize:12,fontWeight:500,color:"#8B95A9"}}>{label}{required&&<span style={{color:"#F43F5E"}}> *</span>}</label>{children}</div>);
+const Field=({label,children,required,error})=>(<div style={{display:"flex",flexDirection:"column",gap:6}}><label style={{fontSize:12,fontWeight:500,color:"#8B95A9"}}>{label}{required&&<span style={{color:"#F43F5E"}}> *</span>}</label>{children}{error&&<span style={{fontSize:11,color:"#F43F5E",marginTop:-2}}>{error}</span>}</div>);
 
 const IS={width:"100%",background:"#0D0F14",border:"1px solid #1E2330",borderRadius:8,padding:"9px 12px",color:"#E8ECF4",fontSize:13,outline:"none",fontFamily:"'DM Sans',sans-serif"};
 const SS={...IS,appearance:"none",backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235A6478' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,backgroundRepeat:"no-repeat",backgroundPosition:"right 12px center",paddingRight:32};
 const BTN=(primary)=>({padding:"9px 20px",borderRadius:8,border:primary?"none":"1px solid #1E2330",background:primary?"#6366F1":"transparent",color:primary?"#fff":"#8B95A9",fontSize:13,fontWeight:primary?600:500,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:6});
 
-const Toast=({message,type,onClose})=>{useEffect(()=>{const t=setTimeout(onClose,3000);return()=>clearTimeout(t)},[onClose]);const bg=type==="success"?"#10B981":type==="error"?"#F43F5E":"#6366F1";return(<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"#171B24",border:`1px solid ${bg}40`,borderRadius:12,padding:"12px 20px",display:"flex",alignItems:"center",gap:10,boxShadow:`0 8px 32px ${bg}20`,animation:"slideUp 0.3s ease"}}><span style={{fontSize:13,fontWeight:500}}>{message}</span></div>)};
+const Toast=({message,type,onClose,onUndo})=>{useEffect(()=>{const t=setTimeout(onClose,onUndo?5000:3000);return()=>clearTimeout(t)},[onClose,onUndo]);const bg=type==="success"?"#10B981":type==="error"?"#F43F5E":"#6366F1";return(<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"#171B24",border:`1px solid ${bg}40`,borderRadius:12,padding:"12px 20px",display:"flex",alignItems:"center",gap:12,boxShadow:`0 8px 32px ${bg}20`,animation:"slideUp 0.3s ease"}}><span style={{fontSize:13,fontWeight:500}}>{message}</span>{onUndo&&<button onClick={()=>{onUndo();onClose()}} style={{background:"transparent",border:"1px solid rgba(255,255,255,0.15)",borderRadius:6,color:"#E8ECF4",fontSize:12,fontWeight:600,cursor:"pointer",padding:"3px 10px",fontFamily:"'DM Sans',sans-serif"}}>Undo</button>}</div>)};
 
 // ─── STORAGE ─────────────────────────────────────────────────────────────────
-function useStorage(key,def){
+function useStorage(key,def,onError){
   const[data,setData]=useState(def);
   const[loaded,setLoaded]=useState(false);
-  useEffect(()=>{(async()=>{try{const r=await window.storage.get(key);if(r&&r.value)setData(JSON.parse(r.value))}catch(e){}setLoaded(true)})()},[key]);
-  const save=useCallback(async(nd)=>{setData(nd);try{await window.storage.set(key,JSON.stringify(nd))}catch(e){console.error(e)}},[key]);
+  useEffect(()=>{(async()=>{try{const r=await window.storage.get(key);if(r&&r.value)setData(JSON.parse(r.value))}catch(e){console.error("Storage load error:",key,e);onError?.("Failed to load saved data. Using defaults.")}setLoaded(true)})()},[key,onError]);
+  const save=useCallback(async(nd)=>{setData(nd);try{await window.storage.set(key,JSON.stringify(nd))}catch(e){console.error("Storage save error:",key,e);onError?.("Failed to save changes. Data may not persist.")}},[key,onError]);
   return[data,save,loaded];
 }
 
@@ -216,13 +244,22 @@ function ItemDetailModal({open,onClose,item,customers}){
 // ─── ITEM FORM MODAL ─────────────────────────────────────────────────────────
 function ItemFormModal({open,onClose,onSave,item}){
   const[form,setForm]=useState({});
+  const[submitted,setSubmitted]=useState(false);
   useEffect(()=>{
+    setSubmitted(false);
     if(item)setForm({...item,cost:String(item.cost),price:String(item.price||"")});
     else setForm({name:"",sku:"",barcode:"",category:"Electronics",condition:"Like New",status:"Received",channel:"",cost:"",price:"",source:"Amazon Liquidation",received:td(),soldDate:"",notes:"",customerId:"",history:[]});
   },[item,open]);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const canSave=form.name&&form.cost;
+  const errs={};
+  if(!form.name?.trim())errs.name="Name is required";
+  if(!form.cost||Number(form.cost)<=0)errs.cost="Cost must be greater than 0";
+  if(form.price&&Number(form.price)<0)errs.price="Price cannot be negative";
+  if(form.barcode&&!/^\d{8,14}$/.test(form.barcode.replace(/\s/g,"")))errs.barcode="Must be 8–14 digits";
+  if(!form.received)errs.received="Date received is required";
+  const canSave=Object.keys(errs).length===0;
   const handleSave=()=>{
+    setSubmitted(true);
     if(!canSave)return;
     const newItem={...form,id:item?.id||uid(),cost:Number(form.cost)||0,price:Number(form.price)||0};
     if(!item){newItem.history=[{date:td(),action:"Received",note:"Item added to inventory"}]}
@@ -231,18 +268,18 @@ function ItemFormModal({open,onClose,onSave,item}){
   return(
     <Modal open={open} onClose={onClose} title={item?"Edit Item":"Add New Item"} width={600}>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <Field label="Product Name" required><input style={IS} value={form.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g. Sony WH-1000XM5 Headphones"/></Field>
+        <Field label="Product Name" required error={submitted&&errs.name}><input style={IS} value={form.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g. Sony WH-1000XM5 Headphones"/></Field>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <Field label="SKU"><input style={IS} value={form.sku||""} onChange={e=>set("sku",e.target.value)} placeholder="SKU-XXXXX"/></Field>
-          <Field label="Barcode / UPC"><input style={IS} value={form.barcode||""} onChange={e=>set("barcode",e.target.value)} placeholder="0123456789012"/></Field>
+          <Field label="Barcode / UPC" error={submitted&&errs.barcode}><input style={IS} value={form.barcode||""} onChange={e=>set("barcode",e.target.value)} placeholder="0123456789012"/></Field>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <Field label="Category" required><select style={SS} value={form.category||""} onChange={e=>set("category",e.target.value)}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></Field>
           <Field label="Condition"><select style={SS} value={form.condition||""} onChange={e=>set("condition",e.target.value)}>{CONDITIONS.map(c=><option key={c}>{c}</option>)}</select></Field>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-          <Field label="Cost (what you paid)" required><input style={IS} type="number" step="0.01" value={form.cost||""} onChange={e=>set("cost",e.target.value)} placeholder="0.00"/></Field>
-          <Field label="List Price"><input style={IS} type="number" step="0.01" value={form.price||""} onChange={e=>set("price",e.target.value)} placeholder="0.00"/></Field>
+          <Field label="Cost (what you paid)" required error={submitted&&errs.cost}><input style={IS} type="number" step="0.01" value={form.cost||""} onChange={e=>set("cost",e.target.value)} placeholder="0.00"/></Field>
+          <Field label="List Price" error={submitted&&errs.price}><input style={IS} type="number" step="0.01" value={form.price||""} onChange={e=>set("price",e.target.value)} placeholder="0.00"/></Field>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <Field label="Status"><select style={SS} value={form.status||""} onChange={e=>set("status",e.target.value)}>{ITEM_STATUSES.map(s=><option key={s}>{s}</option>)}</select></Field>
@@ -250,12 +287,12 @@ function ItemFormModal({open,onClose,onSave,item}){
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <Field label="Source"><select style={SS} value={form.source||""} onChange={e=>set("source",e.target.value)}>{SOURCES.map(s=><option key={s}>{s}</option>)}</select></Field>
-          <Field label="Date Received"><input style={IS} type="date" value={form.received||""} onChange={e=>set("received",e.target.value)}/></Field>
+          <Field label="Date Received" required error={submitted&&errs.received}><input style={IS} type="date" value={form.received||""} onChange={e=>set("received",e.target.value)}/></Field>
         </div>
         <Field label="Notes"><textarea style={{...IS,minHeight:56,resize:"vertical"}} value={form.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional notes..."/></Field>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}>
           <button onClick={onClose} style={BTN(false)}>Cancel</button>
-          <button onClick={handleSave} disabled={!canSave} style={{...BTN(true),opacity:canSave?1:0.4,cursor:canSave?"pointer":"not-allowed"}}>{item?"Save Changes":"Add Item"}</button>
+          <button onClick={handleSave} style={{...BTN(true),opacity:canSave||!submitted?1:0.4,cursor:"pointer"}}>{item?"Save Changes":"Add Item"}</button>
         </div>
       </div>
     </Modal>
@@ -265,47 +302,60 @@ function ItemFormModal({open,onClose,onSave,item}){
 // ─── PO FORM MODAL ───────────────────────────────────────────────────────────
 function POFormModal({open,onClose,onSave,po}){
   const[form,setForm]=useState({});
-  useEffect(()=>{if(po)setForm({...po,pallets:String(po.pallets),units:String(po.units),cost:String(po.cost)});else setForm({source:"Amazon Liquidation",pallets:"",units:"",cost:"",status:"Draft",eta:"",notes:""})},[po,open]);
+  const[submitted,setSubmitted]=useState(false);
+  useEffect(()=>{setSubmitted(false);if(po)setForm({...po,pallets:String(po.pallets),units:String(po.units),cost:String(po.cost)});else setForm({source:"Amazon Liquidation",pallets:"",units:"",cost:"",status:"Draft",eta:"",notes:""})},[po,open]);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const canSave=form.source&&form.cost;
-  const handleSave=()=>{if(!canSave)return;onSave({...form,id:po?.id||poUid(),pallets:Number(form.pallets)||0,units:Number(form.units)||0,cost:Number(form.cost)||0});onClose()};
+  const errs={};
+  if(!form.cost||Number(form.cost)<=0)errs.cost="Cost must be greater than 0";
+  if(form.pallets&&Number(form.pallets)<0)errs.pallets="Cannot be negative";
+  if(form.units&&Number(form.units)<0)errs.units="Cannot be negative";
+  const canSave=Object.keys(errs).length===0;
+  const handleSave=()=>{setSubmitted(true);if(!canSave)return;onSave({...form,id:po?.id||poUid(),pallets:Number(form.pallets)||0,units:Number(form.units)||0,cost:Number(form.cost)||0});onClose()};
   return(<Modal open={open} onClose={onClose} title={po?"Edit PO":"New Purchase Order"} width={500}><div style={{display:"flex",flexDirection:"column",gap:14}}>
     <Field label="Source" required><select style={SS} value={form.source||""} onChange={e=>set("source",e.target.value)}>{SOURCES.map(s=><option key={s}>{s}</option>)}</select></Field>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}><Field label="Pallets"><input style={IS} type="number" value={form.pallets||""} onChange={e=>set("pallets",e.target.value)}/></Field><Field label="Est. Units"><input style={IS} type="number" value={form.units||""} onChange={e=>set("units",e.target.value)}/></Field><Field label="Total Cost" required><input style={IS} type="number" step="0.01" value={form.cost||""} onChange={e=>set("cost",e.target.value)}/></Field></div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}><Field label="Pallets" error={submitted&&errs.pallets}><input style={IS} type="number" value={form.pallets||""} onChange={e=>set("pallets",e.target.value)}/></Field><Field label="Est. Units" error={submitted&&errs.units}><input style={IS} type="number" value={form.units||""} onChange={e=>set("units",e.target.value)}/></Field><Field label="Total Cost" required error={submitted&&errs.cost}><input style={IS} type="number" step="0.01" value={form.cost||""} onChange={e=>set("cost",e.target.value)}/></Field></div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Status"><select style={SS} value={form.status||""} onChange={e=>set("status",e.target.value)}>{PO_STATUSES.map(s=><option key={s}>{s}</option>)}</select></Field><Field label="ETA"><input style={IS} type="date" value={form.eta||""} onChange={e=>set("eta",e.target.value)}/></Field></div>
     <Field label="Notes"><textarea style={{...IS,minHeight:56,resize:"vertical"}} value={form.notes||""} onChange={e=>set("notes",e.target.value)}/></Field>
-    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} disabled={!canSave} style={{...BTN(true),opacity:canSave?1:0.4}}>{po?"Save":"Create PO"}</button></div>
+    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} style={{...BTN(true),opacity:canSave||!submitted?1:0.4}}>{po?"Save":"Create PO"}</button></div>
   </div></Modal>);
 }
 
 // ─── EXPENSE FORM MODAL ──────────────────────────────────────────────────────
 function ExpenseFormModal({open,onClose,onSave,expense}){
   const[form,setForm]=useState({});
-  useEffect(()=>{if(expense)setForm({...expense,amount:String(expense.amount)});else setForm({date:td(),category:"Shipping & Postage",amount:"",description:"",relatedItem:""})},[expense,open]);
+  const[submitted,setSubmitted]=useState(false);
+  useEffect(()=>{setSubmitted(false);if(expense)setForm({...expense,amount:String(expense.amount)});else setForm({date:td(),category:"Shipping & Postage",amount:"",description:"",relatedItem:""})},[expense,open]);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const canSave=form.amount&&form.category;
-  const handleSave=()=>{if(!canSave)return;onSave({...form,id:expense?.id||expUid(),amount:Number(form.amount)||0});onClose()};
+  const errs={};
+  if(!form.date)errs.date="Date is required";
+  if(!form.amount||Number(form.amount)<=0)errs.amount="Amount must be greater than 0";
+  const canSave=Object.keys(errs).length===0;
+  const handleSave=()=>{setSubmitted(true);if(!canSave)return;onSave({...form,id:expense?.id||expUid(),amount:Number(form.amount)||0});onClose()};
   return(<Modal open={open} onClose={onClose} title={expense?"Edit Expense":"Add Expense"} width={480}><div style={{display:"flex",flexDirection:"column",gap:14}}>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Date" required><input style={IS} type="date" value={form.date||""} onChange={e=>set("date",e.target.value)}/></Field><Field label="Amount" required><input style={IS} type="number" step="0.01" value={form.amount||""} onChange={e=>set("amount",e.target.value)} placeholder="0.00"/></Field></div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Date" required error={submitted&&errs.date}><input style={IS} type="date" value={form.date||""} onChange={e=>set("date",e.target.value)}/></Field><Field label="Amount" required error={submitted&&errs.amount}><input style={IS} type="number" step="0.01" value={form.amount||""} onChange={e=>set("amount",e.target.value)} placeholder="0.00"/></Field></div>
     <Field label="Category" required><select style={SS} value={form.category||""} onChange={e=>set("category",e.target.value)}>{EXPENSE_CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></Field>
     <Field label="Description"><input style={IS} value={form.description||""} onChange={e=>set("description",e.target.value)} placeholder="What was this expense for?"/></Field>
-    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} disabled={!canSave} style={{...BTN(true),opacity:canSave?1:0.4}}>{expense?"Save":"Add Expense"}</button></div>
+    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} style={{...BTN(true),opacity:canSave||!submitted?1:0.4}}>{expense?"Save":"Add Expense"}</button></div>
   </div></Modal>);
 }
 
 // ─── CUSTOMER FORM MODAL ─────────────────────────────────────────────────────
 function CustomerFormModal({open,onClose,onSave,customer}){
   const[form,setForm]=useState({});
-  useEffect(()=>{if(customer)setForm({...customer});else setForm({name:"",email:"",phone:"",address:"",notes:"",totalOrders:0,totalSpent:0,lastOrder:""})},[customer,open]);
+  const[submitted,setSubmitted]=useState(false);
+  useEffect(()=>{setSubmitted(false);if(customer)setForm({...customer});else setForm({name:"",email:"",phone:"",address:"",notes:"",totalOrders:0,totalSpent:0,lastOrder:""})},[customer,open]);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const canSave=form.name;
-  const handleSave=()=>{if(!canSave)return;onSave({...form,id:customer?.id||custUid()});onClose()};
+  const errs={};
+  if(!form.name?.trim())errs.name="Name is required";
+  if(form.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))errs.email="Invalid email format";
+  const canSave=Object.keys(errs).length===0;
+  const handleSave=()=>{setSubmitted(true);if(!canSave)return;onSave({...form,id:customer?.id||custUid()});onClose()};
   return(<Modal open={open} onClose={onClose} title={customer?"Edit Customer":"Add Customer"} width={480}><div style={{display:"flex",flexDirection:"column",gap:14}}>
-    <Field label="Name" required><input style={IS} value={form.name||""} onChange={e=>set("name",e.target.value)} placeholder="Full name"/></Field>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Email"><input style={IS} value={form.email||""} onChange={e=>set("email",e.target.value)} placeholder="email@example.com"/></Field><Field label="Phone"><input style={IS} value={form.phone||""} onChange={e=>set("phone",e.target.value)} placeholder="480-555-0000"/></Field></div>
+    <Field label="Name" required error={submitted&&errs.name}><input style={IS} value={form.name||""} onChange={e=>set("name",e.target.value)} placeholder="Full name"/></Field>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Email" error={submitted&&errs.email}><input style={IS} value={form.email||""} onChange={e=>set("email",e.target.value)} placeholder="email@example.com"/></Field><Field label="Phone"><input style={IS} value={form.phone||""} onChange={e=>set("phone",e.target.value)} placeholder="480-555-0000"/></Field></div>
     <Field label="Address"><input style={IS} value={form.address||""} onChange={e=>set("address",e.target.value)} placeholder="Street, City, State ZIP"/></Field>
     <Field label="Notes"><textarea style={{...IS,minHeight:56,resize:"vertical"}} value={form.notes||""} onChange={e=>set("notes",e.target.value)}/></Field>
-    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} disabled={!canSave} style={{...BTN(true),opacity:canSave?1:0.4}}>{customer?"Save":"Add Customer"}</button></div>
+    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} style={{...BTN(true),opacity:canSave||!submitted?1:0.4}}>{customer?"Save":"Add Customer"}</button></div>
   </div></Modal>);
 }
 
@@ -314,14 +364,18 @@ const ConfirmModal=({open,onClose,onConfirm,message})=>(<Modal open={open} onClo
 // ─── SHIPMENT FORM MODAL ────────────────────────────────────────────────────
 function ShipmentFormModal({open,onClose,onSave,shipment,items,customers}){
   const[form,setForm]=useState({});
-  useEffect(()=>{if(shipment)setForm({...shipment,shippingCost:String(shipment.shippingCost)});else setForm({itemId:"",customerId:"",carrier:"USPS",trackingNumber:"",service:"Priority Mail",weight:"",dimensions:"",shippingCost:"",status:"Pending",labelDate:td(),shipDate:"",deliveryDate:"",notes:""})},[shipment,open]);
+  const[submitted,setSubmitted]=useState(false);
+  useEffect(()=>{setSubmitted(false);if(shipment)setForm({...shipment,shippingCost:String(shipment.shippingCost)});else setForm({itemId:"",customerId:"",carrier:"USPS",trackingNumber:"",service:"Priority Mail",weight:"",dimensions:"",shippingCost:"",status:"Pending",labelDate:td(),shipDate:"",deliveryDate:"",notes:""})},[shipment,open]);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const canSave=form.itemId||form.carrier;
+  const errs={};
+  if(!form.itemId)errs.itemId="Item is required";
+  if(form.shippingCost&&Number(form.shippingCost)<0)errs.shippingCost="Cannot be negative";
+  const canSave=Object.keys(errs).length===0;
   const soldItems=items.filter(i=>["Sold","Shipped"].includes(i.status));
-  const handleSave=()=>{if(!canSave)return;onSave({...form,id:shipment?.id||shipUid(),shippingCost:Number(form.shippingCost)||0});onClose()};
+  const handleSave=()=>{setSubmitted(true);if(!canSave)return;onSave({...form,id:shipment?.id||shipUid(),shippingCost:Number(form.shippingCost)||0});onClose()};
   return(<Modal open={open} onClose={onClose} title={shipment?"Edit Shipment":"Create Shipment"} width={560}><div style={{display:"flex",flexDirection:"column",gap:14}}>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-      <Field label="Item"><select style={SS} value={form.itemId||""} onChange={e=>{set("itemId",e.target.value);const it=items.find(i=>i.id===e.target.value);if(it?.customerId)set("customerId",it.customerId)}}><option value="">— Select Item —</option>{soldItems.map(i=><option key={i.id} value={i.id}>{i.id} - {i.name.substring(0,30)}</option>)}</select></Field>
+      <Field label="Item" required error={submitted&&errs.itemId}><select style={SS} value={form.itemId||""} onChange={e=>{set("itemId",e.target.value);const it=items.find(i=>i.id===e.target.value);if(it?.customerId)set("customerId",it.customerId)}}><option value="">— Select Item —</option>{soldItems.map(i=><option key={i.id} value={i.id}>{i.id} - {i.name.substring(0,30)}</option>)}</select></Field>
       <Field label="Customer"><select style={SS} value={form.customerId||""} onChange={e=>set("customerId",e.target.value)}><option value="">— Select —</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
@@ -332,7 +386,7 @@ function ShipmentFormModal({open,onClose,onSave,shipment,items,customers}){
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
       <Field label="Weight (lbs)"><input style={IS} value={form.weight||""} onChange={e=>set("weight",e.target.value)} placeholder="0.0"/></Field>
       <Field label="Dimensions (LxWxH)"><input style={IS} value={form.dimensions||""} onChange={e=>set("dimensions",e.target.value)} placeholder="12x8x6"/></Field>
-      <Field label="Shipping Cost"><input style={IS} type="number" step="0.01" value={form.shippingCost||""} onChange={e=>set("shippingCost",e.target.value)} placeholder="0.00"/></Field>
+      <Field label="Shipping Cost" error={submitted&&errs.shippingCost}><input style={IS} type="number" step="0.01" value={form.shippingCost||""} onChange={e=>set("shippingCost",e.target.value)} placeholder="0.00"/></Field>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
       <Field label="Status"><select style={SS} value={form.status||""} onChange={e=>set("status",e.target.value)}>{SHIPMENT_STATUSES.map(s=><option key={s}>{s}</option>)}</select></Field>
@@ -340,7 +394,7 @@ function ShipmentFormModal({open,onClose,onSave,shipment,items,customers}){
       <Field label="Delivery Date"><input style={IS} type="date" value={form.deliveryDate||""} onChange={e=>set("deliveryDate",e.target.value)}/></Field>
     </div>
     <Field label="Notes"><textarea style={{...IS,minHeight:48,resize:"vertical"}} value={form.notes||""} onChange={e=>set("notes",e.target.value)}/></Field>
-    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} disabled={!canSave} style={{...BTN(true),opacity:canSave?1:0.4}}>{shipment?"Save":"Create Shipment"}</button></div>
+    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} style={{...BTN(true),opacity:canSave||!submitted?1:0.4}}>{shipment?"Save":"Create Shipment"}</button></div>
   </div></Modal>);
 }
 
@@ -356,14 +410,32 @@ function exportCSV(items){
   URL.revokeObjectURL(url);
 }
 
+function parseCSVLine(line){
+  const vals=[];let cur="";let inQuote=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(inQuote){
+      if(ch==='"'&&line[i+1]==='"'){cur+='"';i++}  // escaped quote ""
+      else if(ch==='"'){inQuote=false}
+      else{cur+=ch}
+    }else{
+      if(ch==='"'){inQuote=true}
+      else if(ch===','){vals.push(cur.trim());cur=""}
+      else{cur+=ch}
+    }
+  }
+  vals.push(cur.trim());
+  return vals;
+}
+
 function parseCSV(text){
-  const lines=text.split("\n").filter(l=>l.trim());
+  const lines=text.split(/\r?\n/).filter(l=>l.trim());
   if(lines.length<2)return[];
-  const headers=lines[0].split(",").map(h=>h.trim().replace(/"/g,""));
+  const headers=parseCSVLine(lines[0]).map(h=>h.replace(/^"|"$/g,"").trim());
   return lines.slice(1).map(line=>{
-    const vals=line.match(/(".*?"|[^,]*)/g)||[];
+    const vals=parseCSVLine(line);
     const obj={};
-    headers.forEach((h,i)=>{obj[h]=(vals[i]||"").replace(/^"|"$/g,"").trim()});
+    headers.forEach((h,i)=>{obj[h]=(vals[i]||"").replace(/^"|"$/g,"")});
     return{id:obj.id||uid(),name:obj.name||"Unnamed",sku:obj.sku||"",barcode:obj.barcode||"",category:CATEGORIES.includes(obj.category)?obj.category:"Other",condition:CONDITIONS.includes(obj.condition)?obj.condition:"Good",status:ITEM_STATUSES.includes(obj.status)?obj.status:"Received",channel:obj.channel||"",cost:Number(obj.cost)||0,price:Number(obj.price)||0,source:obj.source||"Other",received:obj.received||td(),soldDate:obj.soldDate||"",notes:obj.notes||"",customerId:"",history:[{date:td(),action:"Imported",note:"Imported via CSV"}]};
   });
 }
@@ -409,7 +481,7 @@ function generateInventoryReport(items){
   const now=new Date();
   const rows=items.map(i=>{
     const margin=i.price>0?((i.price-i.cost)/i.price*100).toFixed(1):"";
-    const days=Math.floor((now-new Date(i.received))/(1000*60*60*24));
+    const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;
     return[i.id,i.name,i.sku,i.barcode,i.category,i.condition,i.status,i.channel||"",i.cost,i.price||"",margin,i.source,i.received,i.soldDate||"",days,i.notes||""].map(v=>JSON.stringify(String(v))).join(",");
   });
   const csv=[headers.join(","),...rows].join("\n");
@@ -419,7 +491,6 @@ function generateInventoryReport(items){
 }
 
 function generateMonthlyReport(items,expenses,shipments,month){
-  const monthItems=items.filter(i=>i.received?.startsWith(month)||i.soldDate?.startsWith(month));
   const monthSold=items.filter(i=>["Sold","Shipped"].includes(i.status)&&i.soldDate?.startsWith(month));
   const monthReceived=items.filter(i=>i.received?.startsWith(month));
   const monthExp=expenses.filter(e=>e.date?.startsWith(month));
@@ -511,7 +582,7 @@ function DashboardPage({items,expenses,setPage}){
       <div style={{background:"#171B24",border:"1px solid #1E2330",borderRadius:14,padding:24}}>
         <div style={{fontSize:15,fontWeight:600,marginBottom:16}}>Recent Items</div>
         <div className="eve-grid-3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
-          {[...items].sort((a,b)=>b.received.localeCompare(a.received)).slice(0,6).map(i=>{
+          {[...items].sort((a,b)=>b.received.localeCompare(a.received)).slice(0,DASH_RECENT_ITEMS).map(i=>{
             const icons2={Received:"📦",Grading:"🔍",Processing:"⚙️",Listed:"📋",Sold:"💰",Shipped:"🚚"};
             return(<div key={i.id} style={{background:"#0D0F14",borderRadius:10,padding:14,display:"flex",gap:10,alignItems:"center"}}>
               <span style={{fontSize:18}}>{icons2[i.status]||"📦"}</span>
@@ -583,7 +654,7 @@ function InventoryPage({items,saveItems,toast}){
     <div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:16}}>
       <ItemFormModal open={showForm} onClose={()=>{setShowForm(false);setEditItem(null)}} onSave={handleSave} item={editItem}/>
       <ItemDetailModal open={!!detailItem} onClose={()=>setDetailItem(null)} item={detailItem} customers={[]}/>
-      <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{saveItems(items.filter(i=>i.id!==deleteId));setDeleteId(null);toast("Deleted","success")}} message="Delete this item permanently?"/>
+      <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{const deleted=items.find(i=>i.id===deleteId);const prev=[...items];saveItems(items.filter(i=>i.id!==deleteId));setDeleteId(null);toast("Item deleted","success",deleted?()=>saveItems(prev):undefined)}} message="Delete this item permanently?"/>
       <input ref={fileRef} type="file" accept=".csv" onChange={handleCSVImport} style={{display:"none"}}/>
 
       {/* Toolbar */}
@@ -672,7 +743,7 @@ function ListingsPage({items,saveItems,toast}){
   return(<div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:20}}>
     <div className="eve-grid-3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>{[{label:"Active Listings",value:listed.length,color:"#6366F1"},{label:"Total Listed Value",value:fmt(totalValue),color:"#10B981"},{label:"Potential Profit",value:fmt(potentialProfit),color:"#F59E0B"}].map((s,i)=>(<div key={i} style={{background:"#171B24",border:"1px solid #1E2330",borderRadius:12,padding:"18px 20px"}}><div style={{fontSize:11,color:"#5A6478",fontWeight:500,textTransform:"uppercase",letterSpacing:"0.5px"}}>{s.label}</div><div style={{fontSize:28,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",letterSpacing:-1,marginTop:4,color:s.color}}>{s.value}</div></div>))}</div>
     <div className="eve-table-wrap" style={{background:"#171B24",border:"1px solid #1E2330",borderRadius:14,overflow:"hidden"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{borderBottom:"1px solid #1E2330"}}>{["ID","Product","Channel","Cost","Price","Profit","Margin","Condition",""].map(h=>(<th key={h} style={{padding:"12px 14px",textAlign:"left",fontSize:11,fontWeight:600,color:"#5A6478",textTransform:"uppercase"}}>{h}</th>))}</tr></thead><tbody>
-      {listed.length===0?<tr><td colSpan={9} style={{padding:40,textAlign:"center",color:"#5A6478"}}>No active listings. Move items to "Listed" status.</td></tr>:
+      {listed.length===0?<tr><td colSpan={9} style={{padding:40,textAlign:"center",color:"#5A6478"}}>No active listings. Move items to &ldquo;Listed&rdquo; status.</td></tr>:
       listed.map(l=>{const profit=(l.price||0)-l.cost;const margin=l.price>0?Math.round((profit/l.price)*100):0;return(<tr key={l.id} style={{borderBottom:"1px solid #1E2330"}} onMouseEnter={e=>e.currentTarget.style.background="#1C2130"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
         <td style={{padding:"12px 14px",fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"#818CF8"}}>{l.id}</td>
         <td style={{padding:"12px 14px",fontWeight:500,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.name}</td>
@@ -698,7 +769,7 @@ function PurchasingPage({pos,savePOs,toast}){
 
   return(<div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:20}}>
     <POFormModal open={showForm} onClose={()=>{setShowForm(false);setEditPO(null)}} onSave={(po)=>{const idx=pos.findIndex(p=>p.id===po.id);const n=[...pos];if(idx>=0)n[idx]=po;else n.unshift(po);savePOs(n);toast(idx>=0?"PO updated":"PO created","success")}} po={editPO}/>
-    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{savePOs(pos.filter(p=>p.id!==deleteId));setDeleteId(null);toast("Deleted","success")}} message="Delete this PO?"/>
+    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{const prev=[...pos];savePOs(pos.filter(p=>p.id!==deleteId));setDeleteId(null);toast("PO deleted","success",()=>savePOs(prev))}} message="Delete this PO?"/>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
       <div className="eve-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,flex:1,marginRight:16}}>
         {[{label:"Active POs",value:pos.filter(p=>!["Complete"].includes(p.status)).length,accent:"#6366F1"},{label:"Total Units",value:totalUnits.toLocaleString(),accent:"#F59E0B"},{label:"Total Spend",value:fmt(totalSpend),accent:"#EC4899"},{label:"Avg Cost/Unit",value:totalUnits>0?fmt(totalSpend/totalUnits):"—",accent:"#10B981"}].map((s,i)=>(
@@ -751,10 +822,10 @@ function AnalyticsPage({items,expenses,shipments}){
   const now=new Date();
   const agingBuckets={"0-7 days":0,"8-14 days":0,"15-30 days":0,"31-60 days":0,"60+ days":0};
   const agingItems=items.filter(i=>!["Sold","Shipped"].includes(i.status));
-  agingItems.forEach(i=>{const days=Math.floor((now-new Date(i.received))/(1000*60*60*24));if(days<=7)agingBuckets["0-7 days"]++;else if(days<=14)agingBuckets["8-14 days"]++;else if(days<=30)agingBuckets["15-30 days"]++;else if(days<=60)agingBuckets["31-60 days"]++;else agingBuckets["60+ days"]++});
+  agingItems.forEach(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;if(days<=7)agingBuckets["0-7 days"]++;else if(days<=14)agingBuckets["8-14 days"]++;else if(days<=30)agingBuckets["15-30 days"]++;else if(days<=60)agingBuckets["31-60 days"]++;else agingBuckets["60+ days"]++});
   const agingData=Object.entries(agingBuckets).map(([range,count])=>({range,count}));
   const agingColors=["#10B981","#34D399","#F59E0B","#F97316","#F43F5E"];
-  const totalAgingCost={};agingItems.forEach(i=>{const days=Math.floor((now-new Date(i.received))/(1000*60*60*24));const bucket=days<=7?"0-7 days":days<=14?"8-14 days":days<=30?"15-30 days":days<=60?"31-60 days":"60+ days";totalAgingCost[bucket]=(totalAgingCost[bucket]||0)+i.cost});
+  const totalAgingCost={};agingItems.forEach(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;const bucket=days<=7?"0-7 days":days<=14?"8-14 days":days<=30?"15-30 days":days<=60?"31-60 days":"60+ days";totalAgingCost[bucket]=(totalAgingCost[bucket]||0)+i.cost});
 
   // Channel performance
   const channelMap={};soldItems.forEach(i=>{if(!i.channel)return;if(!channelMap[i.channel])channelMap[i.channel]={revenue:0,cost:0,count:0,profit:0};channelMap[i.channel].revenue+=(i.price||0);channelMap[i.channel].cost+=i.cost;channelMap[i.channel].count++;channelMap[i.channel].profit+=(i.price||0)-i.cost});
@@ -762,9 +833,9 @@ function AnalyticsPage({items,expenses,shipments}){
   const chColors={"eBay":"#F59E0B","Amazon":"#6366F1","Direct / Website":"#10B981","Wholesale":"#EC4899","Facebook Marketplace":"#06B6D4","Whatnot":"#F43F5E","Mercari":"#8B5CF6","OfferUp":"#14B8A6"};
 
   // Top performers
-  const topProfit=[...soldItems].filter(i=>i.price>0).map(i=>({...i,profit:(i.price||0)-i.cost,margin:Math.round(((i.price-i.cost)/i.price)*100)})).sort((a,b)=>b.profit-a.profit).slice(0,5);
-  const topMargin=[...soldItems].filter(i=>i.price>0).map(i=>({...i,profit:(i.price||0)-i.cost,margin:Math.round(((i.price-i.cost)/i.price)*100)})).sort((a,b)=>b.margin-a.margin).slice(0,5);
-  const fastestSellers=[...soldItems].filter(i=>i.soldDate&&i.received).map(i=>({...i,days:Math.max(0,Math.floor((new Date(i.soldDate)-new Date(i.received))/(1000*60*60*24))),profit:(i.price||0)-i.cost})).sort((a,b)=>a.days-b.days).slice(0,5);
+  const topProfit=[...soldItems].filter(i=>i.price>0).map(i=>({...i,profit:(i.price||0)-i.cost,margin:Math.round(((i.price-i.cost)/i.price)*100)})).sort((a,b)=>b.profit-a.profit).slice(0,TABLE_TOP_PERFORMERS);
+  const topMargin=[...soldItems].filter(i=>i.price>0).map(i=>({...i,profit:(i.price||0)-i.cost,margin:Math.round(((i.price-i.cost)/i.price)*100)})).sort((a,b)=>b.margin-a.margin).slice(0,TABLE_TOP_PERFORMERS);
+  const fastestSellers=[...soldItems].filter(i=>safeDate(i.soldDate)&&safeDate(i.received)).map(i=>{const sold=safeDate(i.soldDate);const rcvd=safeDate(i.received);return{...i,days:Math.max(0,Math.floor((sold-rcvd)/(1000*60*60*24))),profit:(i.price||0)-i.cost}}).sort((a,b)=>a.days-b.days).slice(0,TABLE_TOP_PERFORMERS);
 
   const tabs2=[{id:"overview",label:"Overview"},{id:"aging",label:"Inventory Aging"},{id:"channels",label:"Channel Performance"},{id:"top",label:"Top Performers"}];
 
@@ -859,7 +930,7 @@ function AnalyticsPage({items,expenses,shipments}){
       <div className="eve-table-wrap" style={{background:"#171B24",border:"1px solid #1E2330",borderRadius:14,padding:24}}>
         <div style={{fontSize:15,fontWeight:600,marginBottom:16}}>Oldest Unsold Items</div>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{borderBottom:"1px solid #1E2330"}}>{["ID","Product","Category","Status","Cost","Price","Days Held","Source"].map(h=>(<th key={h} style={{padding:"10px 12px",textAlign:"left",fontSize:11,fontWeight:600,color:"#5A6478",textTransform:"uppercase"}}>{h}</th>))}</tr></thead><tbody>
-          {[...agingItems].sort((a,b)=>new Date(a.received)-new Date(b.received)).slice(0,10).map(i=>{const days=Math.floor((now-new Date(i.received))/(1000*60*60*24));return(<tr key={i.id} style={{borderBottom:"1px solid #1E2330"}}>
+          {[...agingItems].sort((a,b)=>(safeDate(a.received)||0)-(safeDate(b.received)||0)).slice(0,TABLE_OLDEST_ITEMS).map(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;return(<tr key={i.id} style={{borderBottom:"1px solid #1E2330"}}>
             <td style={{padding:"10px 12px",fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"#818CF8"}}>{i.id}</td>
             <td style={{padding:"10px 12px",fontWeight:500,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i.name}</td>
             <td style={{padding:"10px 12px",color:"#8B95A9",fontSize:12}}>{i.category}</td>
@@ -974,7 +1045,7 @@ function ExpensesPage({expenses,saveExpenses,toast}){
 
   return(<div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:20}}>
     <ExpenseFormModal open={showForm} onClose={()=>{setShowForm(false);setEditExp(null)}} onSave={(exp)=>{const idx=expenses.findIndex(e=>e.id===exp.id);const n=[...expenses];if(idx>=0)n[idx]=exp;else n.unshift(exp);saveExpenses(n);toast(idx>=0?"Updated":"Expense added","success")}} expense={editExp}/>
-    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{saveExpenses(expenses.filter(e=>e.id!==deleteId));setDeleteId(null);toast("Deleted","success")}} message="Delete this expense?"/>
+    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{const prev=[...expenses];saveExpenses(expenses.filter(e=>e.id!==deleteId));setDeleteId(null);toast("Expense deleted","success",()=>saveExpenses(prev))}} message="Delete this expense?"/>
 
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
       <div className="eve-grid-3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,flex:1,marginRight:16}}>
@@ -1018,7 +1089,7 @@ function CustomersPage({customers,saveCustomers,items,toast}){
 
   return(<div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:20}}>
     <CustomerFormModal open={showForm} onClose={()=>{setShowForm(false);setEditCust(null)}} onSave={(c)=>{const idx=customers.findIndex(x=>x.id===c.id);const n=[...customers];if(idx>=0)n[idx]=c;else n.unshift(c);saveCustomers(n);toast(idx>=0?"Updated":"Customer added","success")}} customer={editCust}/>
-    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{saveCustomers(customers.filter(c=>c.id!==deleteId));setDeleteId(null);toast("Deleted","success")}} message="Delete this customer?"/>
+    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{const prev=[...customers];saveCustomers(customers.filter(c=>c.id!==deleteId));setDeleteId(null);toast("Customer deleted","success",()=>saveCustomers(prev))}} message="Delete this customer?"/>
 
     <div style={{display:"flex",gap:10,alignItems:"center"}}>
       <div style={{position:"relative",flex:1,maxWidth:320}}><span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#5A6478"}}>{icon(I.search,16)}</span><input type="text" placeholder="Search customers..." value={search} onChange={e=>setSearch(e.target.value)} style={{...IS,paddingLeft:36}}/></div>
@@ -1051,13 +1122,13 @@ function CustomersPage({customers,saveCustomers,items,toast}){
 function AlertsPage({items,expenses}){
   const alerts=[];
   // Low margin items
-  items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{const margin=((i.price-i.cost)/i.price)*100;if(margin<20)alerts.push({type:"warn",icon:"⚠️",title:`Low margin: ${i.name}`,desc:`Only ${margin.toFixed(0)}% margin (cost ${fmt(i.cost)}, price ${fmt(i.price)})`,category:"Low Margin"})});
-  // Slow movers (listed > 10 days ago)
-  const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{const days=Math.floor((now-new Date(i.received))/(1000*60*60*24));if(days>10)alerts.push({type:"info",icon:"🐌",title:`Slow mover: ${i.name}`,desc:`Listed for ${days} days — consider a price drop`,category:"Slow Mover"})});
+  items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{const margin=((i.price-i.cost)/i.price)*100;if(margin<ALERT_LOW_MARGIN_PCT)alerts.push({type:"warn",icon:"⚠️",title:`Low margin: ${i.name}`,desc:`Only ${margin.toFixed(0)}% margin (cost ${fmt(i.cost)}, price ${fmt(i.price)})`,category:"Low Margin"})});
+  // Slow movers (listed > ALERT_SLOW_MOVER_DAYS days ago)
+  const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;if(days>ALERT_SLOW_MOVER_DAYS)alerts.push({type:"info",icon:"🐌",title:`Slow mover: ${i.name}`,desc:`Listed for ${days} days — consider a price drop`,category:"Slow Mover"})});
   // High value items stuck in processing/grading
-  items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>100).forEach(i=>{alerts.push({type:"action",icon:"⏰",title:`High-value item in ${i.status}: ${i.name}`,desc:`${fmt(i.cost)} cost — move to Listed to start recovering`,category:"Action Needed"})});
+  items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>ALERT_HIGH_VALUE_COST).forEach(i=>{alerts.push({type:"action",icon:"⏰",title:`High-value item in ${i.status}: ${i.name}`,desc:`${fmt(i.cost)} cost — move to Listed to start recovering`,category:"Action Needed"})});
   // Large expenses
-  expenses.filter(e=>e.amount>500).forEach(e=>{alerts.push({type:"info",icon:"💸",title:`Large expense: ${e.category}`,desc:`${fmt(e.amount)} — ${e.description}`,category:"Expense Alert"})});
+  expenses.filter(e=>e.amount>ALERT_LARGE_EXPENSE).forEach(e=>{alerts.push({type:"info",icon:"💸",title:`Large expense: ${e.category}`,desc:`${fmt(e.amount)} — ${e.description}`,category:"Expense Alert"})});
   // No price set on listed items
   items.filter(i=>i.status==="Listed"&&!i.price).forEach(i=>{alerts.push({type:"warn",icon:"🏷️",title:`No price set: ${i.name}`,desc:"This item is listed but has no price — set one to track margin",category:"Missing Data"})});
 
@@ -1090,7 +1161,6 @@ function ShippingPage({shipments,saveShipments,items,customers,toast}){
 
   const totalShipCost=shipments.reduce((s,sh)=>s+sh.shippingCost,0);
   const inTransit=shipments.filter(s=>["Pending","Label Created","Picked Up","In Transit","Out for Delivery"].includes(s.status));
-  const delivered=shipments.filter(s=>s.status==="Delivered");
 
   const filtered=filter==="All"?shipments:shipments.filter(s=>s.status===filter);
 
@@ -1110,7 +1180,7 @@ function ShippingPage({shipments,saveShipments,items,customers,toast}){
 
   return(<div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:20}}>
     <ShipmentFormModal open={showForm} onClose={()=>{setShowForm(false);setEditShip(null)}} onSave={(sh)=>{const idx=shipments.findIndex(s=>s.id===sh.id);const n=[...shipments];if(idx>=0)n[idx]=sh;else n.unshift(sh);saveShipments(n);toast(idx>=0?"Updated":"Shipment created","success")}} shipment={editShip} items={items} customers={customers}/>
-    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{saveShipments(shipments.filter(s=>s.id!==deleteId));setDeleteId(null);toast("Deleted","success")}} message="Delete this shipment?"/>
+    <ConfirmModal open={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>{const prev=[...shipments];saveShipments(shipments.filter(s=>s.id!==deleteId));setDeleteId(null);toast("Shipment deleted","success",()=>saveShipments(prev))}} message="Delete this shipment?"/>
 
     <div className="eve-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16}}>
       {[{label:"Total Shipments",value:shipments.length,accent:"#6366F1"},{label:"In Transit",value:inTransit.length,accent:"#F59E0B"},{label:"Awaiting Shipment",value:awaitingShipment.length,accent:awaitingShipment.length>0?"#F43F5E":"#10B981"},{label:"Shipping Costs",value:fmt(totalShipCost),accent:"#EC4899"}].map((s,i)=>(
@@ -1185,7 +1255,6 @@ function ReportsPage({items,expenses,shipments}){
 
   // Summary data for selected month
   const monthSold=items.filter(i=>["Sold","Shipped"].includes(i.status)&&i.soldDate?.startsWith(selectedMonth));
-  const monthReceived=items.filter(i=>i.received?.startsWith(selectedMonth));
   const monthExp=expenses.filter(e=>e.date?.startsWith(selectedMonth));
   const monthShip=shipments.filter(s=>s.shipDate?.startsWith(selectedMonth));
   const rev=monthSold.reduce((s,i)=>s+(i.price||0),0);
@@ -1270,16 +1339,17 @@ function ReportsPage({items,expenses,shipments}){
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
 export default function App(){
   const[page,setPage]=useState("dashboard");
-  const[items,saveItems,il]=useStorage("eve-items-v2",DEFAULT_ITEMS);
-  const[pos,savePOs,pl]=useStorage("eve-pos-v2",DEFAULT_POS);
-  const[expenses,saveExpenses,el]=useStorage("eve-expenses",DEFAULT_EXPENSES);
-  const[customers,saveCustomers,cl]=useStorage("eve-customers",DEFAULT_CUSTOMERS);
-  const[shipments,saveShipments,sl]=useStorage("eve-shipments",DEFAULT_SHIPMENTS);
   const[sidebarOpen,setSidebarOpen]=useState(false);
   const[toastMsg,setToastMsg]=useState(null);
-  const toast=(m,t)=>setToastMsg({message:m,type:t});
+  const toast=(m,t,onUndo)=>setToastMsg({message:m,type:t,onUndo});
+  const storageError=useCallback((m)=>toast(m,"error"),[]);
+  const[items,saveItems,il]=useStorage("eve-items-v2",DEFAULT_ITEMS,storageError);
+  const[pos,savePOs,pl]=useStorage("eve-pos-v2",DEFAULT_POS,storageError);
+  const[expenses,saveExpenses,el]=useStorage("eve-expenses",DEFAULT_EXPENSES,storageError);
+  const[customers,saveCustomers,cl]=useStorage("eve-customers",DEFAULT_CUSTOMERS,storageError);
+  const[shipments,saveShipments,sl]=useStorage("eve-shipments",DEFAULT_SHIPMENTS,storageError);
 
-  const alertCount=useMemo(()=>{let c=0;items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{if(((i.price-i.cost)/i.price)*100<20)c++});const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{if(Math.floor((now-new Date(i.received))/(1000*60*60*24))>10)c++});items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>100).forEach(()=>c++);return c},[items]);
+  const alertCount=useMemo(()=>{let c=0;items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{if(((i.price-i.cost)/i.price)*100<ALERT_LOW_MARGIN_PCT)c++});const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{const rcvd=safeDate(i.received);if(rcvd&&Math.floor((now-rcvd)/(1000*60*60*24))>ALERT_SLOW_MOVER_DAYS)c++});items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>ALERT_HIGH_VALUE_COST).forEach(()=>c++);return c},[items]);
 
   const awaitingShipCount=useMemo(()=>{const shipped=new Set(shipments.map(s=>s.itemId));return items.filter(i=>i.status==="Sold"&&!shipped.has(i.id)).length},[items,shipments]);
 
@@ -1335,7 +1405,7 @@ export default function App(){
           .eve-table-wrap{font-size:12px!important}
         }
       `}</style>
-      {toastMsg&&<Toast message={toastMsg.message} type={toastMsg.type} onClose={()=>setToastMsg(null)}/>}
+      {toastMsg&&<Toast message={toastMsg.message} type={toastMsg.type} onUndo={toastMsg.onUndo} onClose={()=>setToastMsg(null)}/>}
 
       {/* Sidebar Overlay */}
       <div className={`eve-sidebar-overlay${sidebarOpen?" open":""}`} onClick={()=>setSidebarOpen(false)}/>
