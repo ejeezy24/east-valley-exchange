@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -108,6 +108,24 @@ const I={
   menu:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>,
 };
 const icon = (i,s=18) => <span style={{width:s,height:s,display:"inline-flex",flexShrink:0}}>{i}</span>;
+
+// ─── ERROR BOUNDARY ──────────────────────────────────────────────────────────
+export class ErrorBoundary extends React.Component{
+  constructor(props){super(props);this.state={error:null}}
+  static getDerivedStateFromError(e){return{error:e}}
+  componentDidCatch(e,info){console.error("App error:",e,info)}
+  render(){
+    if(this.state.error)return(
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0A0C10",color:"#E8ECF4",fontFamily:"'DM Sans',sans-serif",gap:16,padding:32,textAlign:"center"}}>
+        <div style={{fontSize:48}}>⚠</div>
+        <h2 style={{fontSize:20,fontWeight:600,margin:0}}>Something went wrong</h2>
+        <p style={{fontSize:13,color:"#8B95A9",margin:0,maxWidth:400}}>{this.state.error.message}</p>
+        <button onClick={()=>this.setState({error:null})} style={{padding:"9px 20px",borderRadius:8,border:"none",background:"#6366F1",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Try again</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
 
 // ─── SHARED COMPONENTS ───────────────────────────────────────────────────────
 const StatusBadge=({status})=>{const c={Listed:["rgba(99,102,241,0.12)","#818CF8"],Active:["rgba(99,102,241,0.12)","#818CF8"],Processing:["rgba(245,158,11,0.12)","#FBBF24"],Grading:["rgba(6,182,212,0.12)","#22D3EE"],Sold:["rgba(16,185,129,0.12)","#34D399"],Shipped:["rgba(16,185,129,0.12)","#34D399"],Complete:["rgba(16,185,129,0.12)","#34D399"],Received:["rgba(99,102,241,0.12)","#818CF8"],"In Transit":["rgba(245,158,11,0.12)","#FBBF24"],Draft:["rgba(255,255,255,0.06)","#8B95A9"],Ordered:["rgba(6,182,212,0.12)","#22D3EE"]};const[bg,fg]=c[status]||["rgba(255,255,255,0.06)","#8B95A9"];return<span style={{background:bg,color:fg,padding:"3px 10px",borderRadius:6,fontSize:12,fontWeight:500,whiteSpace:"nowrap"}}>{status}</span>};
