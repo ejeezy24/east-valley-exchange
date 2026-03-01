@@ -134,7 +134,7 @@ const CustomTooltip=({active,payload,label})=>{if(!active||!payload?.length)retu
 
 const Modal=({open,onClose,title,width,children})=>{if(!open)return null;return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",backdropFilter:"blur(4px)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}><div onClick={e=>e.stopPropagation()} style={{background:"#171B24",border:"1px solid #262D3D",borderRadius:16,width:width||520,maxHeight:"90vh",overflow:"auto",boxShadow:"0 24px 64px rgba(0,0,0,0.5)"}}><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"18px 24px",borderBottom:"1px solid #1E2330",position:"sticky",top:0,background:"#171B24",borderRadius:"16px 16px 0 0",zIndex:2}}><h2 style={{fontSize:16,fontWeight:600,margin:0}}>{title}</h2><button onClick={onClose} style={{width:32,height:32,borderRadius:8,border:"1px solid #1E2330",background:"transparent",color:"#8B95A9",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>{icon(I.x,16)}</button></div><div style={{padding:24}}>{children}</div></div></div>)};
 
-const Field=({label,children,required})=>(<div style={{display:"flex",flexDirection:"column",gap:6}}><label style={{fontSize:12,fontWeight:500,color:"#8B95A9"}}>{label}{required&&<span style={{color:"#F43F5E"}}> *</span>}</label>{children}</div>);
+const Field=({label,children,required,error})=>(<div style={{display:"flex",flexDirection:"column",gap:6}}><label style={{fontSize:12,fontWeight:500,color:"#8B95A9"}}>{label}{required&&<span style={{color:"#F43F5E"}}> *</span>}</label>{children}{error&&<span style={{fontSize:11,color:"#F43F5E",marginTop:-2}}>{error}</span>}</div>);
 
 const IS={width:"100%",background:"#0D0F14",border:"1px solid #1E2330",borderRadius:8,padding:"9px 12px",color:"#E8ECF4",fontSize:13,outline:"none",fontFamily:"'DM Sans',sans-serif"};
 const SS={...IS,appearance:"none",backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235A6478' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,backgroundRepeat:"no-repeat",backgroundPosition:"right 12px center",paddingRight:32};
@@ -236,13 +236,22 @@ function ItemDetailModal({open,onClose,item,customers}){
 // ─── ITEM FORM MODAL ─────────────────────────────────────────────────────────
 function ItemFormModal({open,onClose,onSave,item}){
   const[form,setForm]=useState({});
+  const[submitted,setSubmitted]=useState(false);
   useEffect(()=>{
+    setSubmitted(false);
     if(item)setForm({...item,cost:String(item.cost),price:String(item.price||"")});
     else setForm({name:"",sku:"",barcode:"",category:"Electronics",condition:"Like New",status:"Received",channel:"",cost:"",price:"",source:"Amazon Liquidation",received:td(),soldDate:"",notes:"",customerId:"",history:[]});
   },[item,open]);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const canSave=form.name&&form.cost;
+  const errs={};
+  if(!form.name?.trim())errs.name="Name is required";
+  if(!form.cost||Number(form.cost)<=0)errs.cost="Cost must be greater than 0";
+  if(form.price&&Number(form.price)<0)errs.price="Price cannot be negative";
+  if(form.barcode&&!/^\d{8,14}$/.test(form.barcode.replace(/\s/g,"")))errs.barcode="Must be 8–14 digits";
+  if(!form.received)errs.received="Date received is required";
+  const canSave=Object.keys(errs).length===0;
   const handleSave=()=>{
+    setSubmitted(true);
     if(!canSave)return;
     const newItem={...form,id:item?.id||uid(),cost:Number(form.cost)||0,price:Number(form.price)||0};
     if(!item){newItem.history=[{date:td(),action:"Received",note:"Item added to inventory"}]}
@@ -251,18 +260,18 @@ function ItemFormModal({open,onClose,onSave,item}){
   return(
     <Modal open={open} onClose={onClose} title={item?"Edit Item":"Add New Item"} width={600}>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <Field label="Product Name" required><input style={IS} value={form.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g. Sony WH-1000XM5 Headphones"/></Field>
+        <Field label="Product Name" required error={submitted&&errs.name}><input style={IS} value={form.name||""} onChange={e=>set("name",e.target.value)} placeholder="e.g. Sony WH-1000XM5 Headphones"/></Field>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <Field label="SKU"><input style={IS} value={form.sku||""} onChange={e=>set("sku",e.target.value)} placeholder="SKU-XXXXX"/></Field>
-          <Field label="Barcode / UPC"><input style={IS} value={form.barcode||""} onChange={e=>set("barcode",e.target.value)} placeholder="0123456789012"/></Field>
+          <Field label="Barcode / UPC" error={submitted&&errs.barcode}><input style={IS} value={form.barcode||""} onChange={e=>set("barcode",e.target.value)} placeholder="0123456789012"/></Field>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <Field label="Category" required><select style={SS} value={form.category||""} onChange={e=>set("category",e.target.value)}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></Field>
           <Field label="Condition"><select style={SS} value={form.condition||""} onChange={e=>set("condition",e.target.value)}>{CONDITIONS.map(c=><option key={c}>{c}</option>)}</select></Field>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-          <Field label="Cost (what you paid)" required><input style={IS} type="number" step="0.01" value={form.cost||""} onChange={e=>set("cost",e.target.value)} placeholder="0.00"/></Field>
-          <Field label="List Price"><input style={IS} type="number" step="0.01" value={form.price||""} onChange={e=>set("price",e.target.value)} placeholder="0.00"/></Field>
+          <Field label="Cost (what you paid)" required error={submitted&&errs.cost}><input style={IS} type="number" step="0.01" value={form.cost||""} onChange={e=>set("cost",e.target.value)} placeholder="0.00"/></Field>
+          <Field label="List Price" error={submitted&&errs.price}><input style={IS} type="number" step="0.01" value={form.price||""} onChange={e=>set("price",e.target.value)} placeholder="0.00"/></Field>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <Field label="Status"><select style={SS} value={form.status||""} onChange={e=>set("status",e.target.value)}>{ITEM_STATUSES.map(s=><option key={s}>{s}</option>)}</select></Field>
@@ -270,12 +279,12 @@ function ItemFormModal({open,onClose,onSave,item}){
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <Field label="Source"><select style={SS} value={form.source||""} onChange={e=>set("source",e.target.value)}>{SOURCES.map(s=><option key={s}>{s}</option>)}</select></Field>
-          <Field label="Date Received"><input style={IS} type="date" value={form.received||""} onChange={e=>set("received",e.target.value)}/></Field>
+          <Field label="Date Received" required error={submitted&&errs.received}><input style={IS} type="date" value={form.received||""} onChange={e=>set("received",e.target.value)}/></Field>
         </div>
         <Field label="Notes"><textarea style={{...IS,minHeight:56,resize:"vertical"}} value={form.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional notes..."/></Field>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}>
           <button onClick={onClose} style={BTN(false)}>Cancel</button>
-          <button onClick={handleSave} disabled={!canSave} style={{...BTN(true),opacity:canSave?1:0.4,cursor:canSave?"pointer":"not-allowed"}}>{item?"Save Changes":"Add Item"}</button>
+          <button onClick={handleSave} style={{...BTN(true),opacity:canSave||!submitted?1:0.4,cursor:"pointer"}}>{item?"Save Changes":"Add Item"}</button>
         </div>
       </div>
     </Modal>
@@ -285,47 +294,60 @@ function ItemFormModal({open,onClose,onSave,item}){
 // ─── PO FORM MODAL ───────────────────────────────────────────────────────────
 function POFormModal({open,onClose,onSave,po}){
   const[form,setForm]=useState({});
-  useEffect(()=>{if(po)setForm({...po,pallets:String(po.pallets),units:String(po.units),cost:String(po.cost)});else setForm({source:"Amazon Liquidation",pallets:"",units:"",cost:"",status:"Draft",eta:"",notes:""})},[po,open]);
+  const[submitted,setSubmitted]=useState(false);
+  useEffect(()=>{setSubmitted(false);if(po)setForm({...po,pallets:String(po.pallets),units:String(po.units),cost:String(po.cost)});else setForm({source:"Amazon Liquidation",pallets:"",units:"",cost:"",status:"Draft",eta:"",notes:""})},[po,open]);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const canSave=form.source&&form.cost;
-  const handleSave=()=>{if(!canSave)return;onSave({...form,id:po?.id||poUid(),pallets:Number(form.pallets)||0,units:Number(form.units)||0,cost:Number(form.cost)||0});onClose()};
+  const errs={};
+  if(!form.cost||Number(form.cost)<=0)errs.cost="Cost must be greater than 0";
+  if(form.pallets&&Number(form.pallets)<0)errs.pallets="Cannot be negative";
+  if(form.units&&Number(form.units)<0)errs.units="Cannot be negative";
+  const canSave=Object.keys(errs).length===0;
+  const handleSave=()=>{setSubmitted(true);if(!canSave)return;onSave({...form,id:po?.id||poUid(),pallets:Number(form.pallets)||0,units:Number(form.units)||0,cost:Number(form.cost)||0});onClose()};
   return(<Modal open={open} onClose={onClose} title={po?"Edit PO":"New Purchase Order"} width={500}><div style={{display:"flex",flexDirection:"column",gap:14}}>
     <Field label="Source" required><select style={SS} value={form.source||""} onChange={e=>set("source",e.target.value)}>{SOURCES.map(s=><option key={s}>{s}</option>)}</select></Field>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}><Field label="Pallets"><input style={IS} type="number" value={form.pallets||""} onChange={e=>set("pallets",e.target.value)}/></Field><Field label="Est. Units"><input style={IS} type="number" value={form.units||""} onChange={e=>set("units",e.target.value)}/></Field><Field label="Total Cost" required><input style={IS} type="number" step="0.01" value={form.cost||""} onChange={e=>set("cost",e.target.value)}/></Field></div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}><Field label="Pallets" error={submitted&&errs.pallets}><input style={IS} type="number" value={form.pallets||""} onChange={e=>set("pallets",e.target.value)}/></Field><Field label="Est. Units" error={submitted&&errs.units}><input style={IS} type="number" value={form.units||""} onChange={e=>set("units",e.target.value)}/></Field><Field label="Total Cost" required error={submitted&&errs.cost}><input style={IS} type="number" step="0.01" value={form.cost||""} onChange={e=>set("cost",e.target.value)}/></Field></div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Status"><select style={SS} value={form.status||""} onChange={e=>set("status",e.target.value)}>{PO_STATUSES.map(s=><option key={s}>{s}</option>)}</select></Field><Field label="ETA"><input style={IS} type="date" value={form.eta||""} onChange={e=>set("eta",e.target.value)}/></Field></div>
     <Field label="Notes"><textarea style={{...IS,minHeight:56,resize:"vertical"}} value={form.notes||""} onChange={e=>set("notes",e.target.value)}/></Field>
-    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} disabled={!canSave} style={{...BTN(true),opacity:canSave?1:0.4}}>{po?"Save":"Create PO"}</button></div>
+    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} style={{...BTN(true),opacity:canSave||!submitted?1:0.4}}>{po?"Save":"Create PO"}</button></div>
   </div></Modal>);
 }
 
 // ─── EXPENSE FORM MODAL ──────────────────────────────────────────────────────
 function ExpenseFormModal({open,onClose,onSave,expense}){
   const[form,setForm]=useState({});
-  useEffect(()=>{if(expense)setForm({...expense,amount:String(expense.amount)});else setForm({date:td(),category:"Shipping & Postage",amount:"",description:"",relatedItem:""})},[expense,open]);
+  const[submitted,setSubmitted]=useState(false);
+  useEffect(()=>{setSubmitted(false);if(expense)setForm({...expense,amount:String(expense.amount)});else setForm({date:td(),category:"Shipping & Postage",amount:"",description:"",relatedItem:""})},[expense,open]);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const canSave=form.amount&&form.category;
-  const handleSave=()=>{if(!canSave)return;onSave({...form,id:expense?.id||expUid(),amount:Number(form.amount)||0});onClose()};
+  const errs={};
+  if(!form.date)errs.date="Date is required";
+  if(!form.amount||Number(form.amount)<=0)errs.amount="Amount must be greater than 0";
+  const canSave=Object.keys(errs).length===0;
+  const handleSave=()=>{setSubmitted(true);if(!canSave)return;onSave({...form,id:expense?.id||expUid(),amount:Number(form.amount)||0});onClose()};
   return(<Modal open={open} onClose={onClose} title={expense?"Edit Expense":"Add Expense"} width={480}><div style={{display:"flex",flexDirection:"column",gap:14}}>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Date" required><input style={IS} type="date" value={form.date||""} onChange={e=>set("date",e.target.value)}/></Field><Field label="Amount" required><input style={IS} type="number" step="0.01" value={form.amount||""} onChange={e=>set("amount",e.target.value)} placeholder="0.00"/></Field></div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Date" required error={submitted&&errs.date}><input style={IS} type="date" value={form.date||""} onChange={e=>set("date",e.target.value)}/></Field><Field label="Amount" required error={submitted&&errs.amount}><input style={IS} type="number" step="0.01" value={form.amount||""} onChange={e=>set("amount",e.target.value)} placeholder="0.00"/></Field></div>
     <Field label="Category" required><select style={SS} value={form.category||""} onChange={e=>set("category",e.target.value)}>{EXPENSE_CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></Field>
     <Field label="Description"><input style={IS} value={form.description||""} onChange={e=>set("description",e.target.value)} placeholder="What was this expense for?"/></Field>
-    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} disabled={!canSave} style={{...BTN(true),opacity:canSave?1:0.4}}>{expense?"Save":"Add Expense"}</button></div>
+    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} style={{...BTN(true),opacity:canSave||!submitted?1:0.4}}>{expense?"Save":"Add Expense"}</button></div>
   </div></Modal>);
 }
 
 // ─── CUSTOMER FORM MODAL ─────────────────────────────────────────────────────
 function CustomerFormModal({open,onClose,onSave,customer}){
   const[form,setForm]=useState({});
-  useEffect(()=>{if(customer)setForm({...customer});else setForm({name:"",email:"",phone:"",address:"",notes:"",totalOrders:0,totalSpent:0,lastOrder:""})},[customer,open]);
+  const[submitted,setSubmitted]=useState(false);
+  useEffect(()=>{setSubmitted(false);if(customer)setForm({...customer});else setForm({name:"",email:"",phone:"",address:"",notes:"",totalOrders:0,totalSpent:0,lastOrder:""})},[customer,open]);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const canSave=form.name;
-  const handleSave=()=>{if(!canSave)return;onSave({...form,id:customer?.id||custUid()});onClose()};
+  const errs={};
+  if(!form.name?.trim())errs.name="Name is required";
+  if(form.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))errs.email="Invalid email format";
+  const canSave=Object.keys(errs).length===0;
+  const handleSave=()=>{setSubmitted(true);if(!canSave)return;onSave({...form,id:customer?.id||custUid()});onClose()};
   return(<Modal open={open} onClose={onClose} title={customer?"Edit Customer":"Add Customer"} width={480}><div style={{display:"flex",flexDirection:"column",gap:14}}>
-    <Field label="Name" required><input style={IS} value={form.name||""} onChange={e=>set("name",e.target.value)} placeholder="Full name"/></Field>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Email"><input style={IS} value={form.email||""} onChange={e=>set("email",e.target.value)} placeholder="email@example.com"/></Field><Field label="Phone"><input style={IS} value={form.phone||""} onChange={e=>set("phone",e.target.value)} placeholder="480-555-0000"/></Field></div>
+    <Field label="Name" required error={submitted&&errs.name}><input style={IS} value={form.name||""} onChange={e=>set("name",e.target.value)} placeholder="Full name"/></Field>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><Field label="Email" error={submitted&&errs.email}><input style={IS} value={form.email||""} onChange={e=>set("email",e.target.value)} placeholder="email@example.com"/></Field><Field label="Phone"><input style={IS} value={form.phone||""} onChange={e=>set("phone",e.target.value)} placeholder="480-555-0000"/></Field></div>
     <Field label="Address"><input style={IS} value={form.address||""} onChange={e=>set("address",e.target.value)} placeholder="Street, City, State ZIP"/></Field>
     <Field label="Notes"><textarea style={{...IS,minHeight:56,resize:"vertical"}} value={form.notes||""} onChange={e=>set("notes",e.target.value)}/></Field>
-    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} disabled={!canSave} style={{...BTN(true),opacity:canSave?1:0.4}}>{customer?"Save":"Add Customer"}</button></div>
+    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} style={{...BTN(true),opacity:canSave||!submitted?1:0.4}}>{customer?"Save":"Add Customer"}</button></div>
   </div></Modal>);
 }
 
@@ -334,14 +356,18 @@ const ConfirmModal=({open,onClose,onConfirm,message})=>(<Modal open={open} onClo
 // ─── SHIPMENT FORM MODAL ────────────────────────────────────────────────────
 function ShipmentFormModal({open,onClose,onSave,shipment,items,customers}){
   const[form,setForm]=useState({});
-  useEffect(()=>{if(shipment)setForm({...shipment,shippingCost:String(shipment.shippingCost)});else setForm({itemId:"",customerId:"",carrier:"USPS",trackingNumber:"",service:"Priority Mail",weight:"",dimensions:"",shippingCost:"",status:"Pending",labelDate:td(),shipDate:"",deliveryDate:"",notes:""})},[shipment,open]);
+  const[submitted,setSubmitted]=useState(false);
+  useEffect(()=>{setSubmitted(false);if(shipment)setForm({...shipment,shippingCost:String(shipment.shippingCost)});else setForm({itemId:"",customerId:"",carrier:"USPS",trackingNumber:"",service:"Priority Mail",weight:"",dimensions:"",shippingCost:"",status:"Pending",labelDate:td(),shipDate:"",deliveryDate:"",notes:""})},[shipment,open]);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const canSave=form.itemId||form.carrier;
+  const errs={};
+  if(!form.itemId)errs.itemId="Item is required";
+  if(form.shippingCost&&Number(form.shippingCost)<0)errs.shippingCost="Cannot be negative";
+  const canSave=Object.keys(errs).length===0;
   const soldItems=items.filter(i=>["Sold","Shipped"].includes(i.status));
-  const handleSave=()=>{if(!canSave)return;onSave({...form,id:shipment?.id||shipUid(),shippingCost:Number(form.shippingCost)||0});onClose()};
+  const handleSave=()=>{setSubmitted(true);if(!canSave)return;onSave({...form,id:shipment?.id||shipUid(),shippingCost:Number(form.shippingCost)||0});onClose()};
   return(<Modal open={open} onClose={onClose} title={shipment?"Edit Shipment":"Create Shipment"} width={560}><div style={{display:"flex",flexDirection:"column",gap:14}}>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-      <Field label="Item"><select style={SS} value={form.itemId||""} onChange={e=>{set("itemId",e.target.value);const it=items.find(i=>i.id===e.target.value);if(it?.customerId)set("customerId",it.customerId)}}><option value="">— Select Item —</option>{soldItems.map(i=><option key={i.id} value={i.id}>{i.id} - {i.name.substring(0,30)}</option>)}</select></Field>
+      <Field label="Item" required error={submitted&&errs.itemId}><select style={SS} value={form.itemId||""} onChange={e=>{set("itemId",e.target.value);const it=items.find(i=>i.id===e.target.value);if(it?.customerId)set("customerId",it.customerId)}}><option value="">— Select Item —</option>{soldItems.map(i=><option key={i.id} value={i.id}>{i.id} - {i.name.substring(0,30)}</option>)}</select></Field>
       <Field label="Customer"><select style={SS} value={form.customerId||""} onChange={e=>set("customerId",e.target.value)}><option value="">— Select —</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
@@ -352,7 +378,7 @@ function ShipmentFormModal({open,onClose,onSave,shipment,items,customers}){
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
       <Field label="Weight (lbs)"><input style={IS} value={form.weight||""} onChange={e=>set("weight",e.target.value)} placeholder="0.0"/></Field>
       <Field label="Dimensions (LxWxH)"><input style={IS} value={form.dimensions||""} onChange={e=>set("dimensions",e.target.value)} placeholder="12x8x6"/></Field>
-      <Field label="Shipping Cost"><input style={IS} type="number" step="0.01" value={form.shippingCost||""} onChange={e=>set("shippingCost",e.target.value)} placeholder="0.00"/></Field>
+      <Field label="Shipping Cost" error={submitted&&errs.shippingCost}><input style={IS} type="number" step="0.01" value={form.shippingCost||""} onChange={e=>set("shippingCost",e.target.value)} placeholder="0.00"/></Field>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
       <Field label="Status"><select style={SS} value={form.status||""} onChange={e=>set("status",e.target.value)}>{SHIPMENT_STATUSES.map(s=><option key={s}>{s}</option>)}</select></Field>
@@ -360,7 +386,7 @@ function ShipmentFormModal({open,onClose,onSave,shipment,items,customers}){
       <Field label="Delivery Date"><input style={IS} type="date" value={form.deliveryDate||""} onChange={e=>set("deliveryDate",e.target.value)}/></Field>
     </div>
     <Field label="Notes"><textarea style={{...IS,minHeight:48,resize:"vertical"}} value={form.notes||""} onChange={e=>set("notes",e.target.value)}/></Field>
-    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} disabled={!canSave} style={{...BTN(true),opacity:canSave?1:0.4}}>{shipment?"Save":"Create Shipment"}</button></div>
+    <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}><button onClick={onClose} style={BTN(false)}>Cancel</button><button onClick={handleSave} style={{...BTN(true),opacity:canSave||!submitted?1:0.4}}>{shipment?"Save":"Create Shipment"}</button></div>
   </div></Modal>);
 }
 
