@@ -3,6 +3,8 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
+import { ref, onValue, set, get } from "firebase/database";
+import { db, hasConfig } from "./firebase.js";
 
 // ─── FONT ────────────────────────────────────────────────────────────────────
 const fl = document.createElement("link");
@@ -155,12 +157,47 @@ const BTN=(primary)=>({padding:"9px 20px",borderRadius:8,border:primary?"none":"
 
 const Toast=({message,type,onClose,onUndo})=>{useEffect(()=>{const t=setTimeout(onClose,onUndo?5000:3000);return()=>clearTimeout(t)},[onClose,onUndo]);const bg=type==="success"?"#10B981":type==="error"?"#F43F5E":"#6366F1";return(<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"#171B24",border:`1px solid ${bg}40`,borderRadius:12,padding:"12px 20px",display:"flex",alignItems:"center",gap:12,boxShadow:`0 8px 32px ${bg}20`,animation:"slideUp 0.3s ease"}}><span style={{fontSize:13,fontWeight:500}}>{message}</span>{onUndo&&<button onClick={()=>{onUndo();onClose()}} style={{background:"transparent",border:"1px solid rgba(255,255,255,0.15)",borderRadius:6,color:"#E8ECF4",fontSize:12,fontWeight:600,cursor:"pointer",padding:"3px 10px",fontFamily:"'DM Sans',sans-serif"}}>Undo</button>}</div>)};
 
-// ─── STORAGE ─────────────────────────────────────────────────────────────────
+// ─── STORAGE (Firebase real-time + localStorage fallback) ───────────────────
 function useStorage(key,def,onError){
   const[data,setData]=useState(def);
   const[loaded,setLoaded]=useState(false);
-  useEffect(()=>{(async()=>{try{const r=await window.storage.get(key);if(r&&r.value)setData(JSON.parse(r.value))}catch(e){console.error("Storage load error:",key,e);onError?.("Failed to load saved data. Using defaults.")}setLoaded(true)})()},[key,onError]);
-  const save=useCallback(async(nd)=>{setData(nd);try{await window.storage.set(key,JSON.stringify(nd))}catch(e){console.error("Storage save error:",key,e);onError?.("Failed to save changes. Data may not persist.")}},[key,onError]);
+
+  useEffect(()=>{
+    if(hasConfig&&db){
+      // Firebase mode: subscribe to real-time updates
+      const dbRef=ref(db,key);
+      const unsub=onValue(dbRef,(snapshot)=>{
+        if(snapshot.exists()){
+          const val=snapshot.val();
+          setData(val);
+          // Mirror to localStorage for offline fallback
+          try{localStorage.setItem(key,JSON.stringify(val))}catch(_){}
+        }
+        setLoaded(true);
+      },(error)=>{
+        console.error("Firebase listen error:",key,error);
+        // Fall back to localStorage
+        try{const cached=localStorage.getItem(key);if(cached)setData(JSON.parse(cached))}catch(_){}
+        onError?.("Running in offline mode. Changes may not sync.");
+        setLoaded(true);
+      });
+      return()=>unsub();
+    }else{
+      // No Firebase config: use localStorage only (original behavior)
+      try{const v=localStorage.getItem(key);if(v)setData(JSON.parse(v))}catch(e){console.error("Storage load error:",key,e);onError?.("Failed to load saved data.")}
+      setLoaded(true);
+    }
+  },[key,onError]);
+
+  const save=useCallback(async(nd)=>{
+    setData(nd);
+    // Always mirror to localStorage
+    try{localStorage.setItem(key,JSON.stringify(nd))}catch(_){}
+    if(hasConfig&&db){
+      try{await set(ref(db,key),nd)}catch(e){console.error("Firebase save error:",key,e);onError?.("Saved locally. Will sync when connection restores.")}
+    }
+  },[key,onError]);
+
   return[data,save,loaded];
 }
 
@@ -1580,6 +1617,34 @@ export default function App(){
   const[customers,saveCustomers,cl]=useStorage("eve-customers",DEFAULT_CUSTOMERS,storageError);
   const[shipments,saveShipments,sl]=useStorage("eve-shipments",DEFAULT_SHIPMENTS,storageError);
 
+  // Firebase connection status
+  const[fbOnline,setFbOnline]=useState(!hasConfig);
+  useEffect(()=>{
+    if(!hasConfig||!db)return;
+    const connRef=ref(db,".info/connected");
+    const unsub=onValue(connRef,(snap)=>setFbOnline(snap.val()===true));
+    return()=>unsub();
+  },[]);
+
+  // One-time migration: localStorage → Firebase
+  useEffect(()=>{
+    if(!hasConfig||!db)return;
+    const MIG_KEY="eve-firebase-migrated";
+    if(localStorage.getItem(MIG_KEY))return;
+    const keys=["eve-items-v2","eve-pos-v2","eve-expenses","eve-customers","eve-shipments"];
+    Promise.all(keys.map(async(key)=>{
+      const local=localStorage.getItem(key);
+      if(!local)return;
+      const snapshot=await get(ref(db,key));
+      if(!snapshot.exists()){
+        await set(ref(db,key),JSON.parse(local));
+      }
+    })).then(()=>{
+      localStorage.setItem(MIG_KEY,"true");
+      console.log("Firebase migration complete");
+    }).catch(e=>console.error("Migration error:",e));
+  },[]);
+
   const alertCount=useMemo(()=>{let c=0;items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{if(((i.price-i.cost)/i.price)*100<ALERT_LOW_MARGIN_PCT)c++});const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{const rcvd=safeDate(i.received);if(rcvd&&Math.floor((now-rcvd)/(1000*60*60*24))>ALERT_SLOW_MOVER_DAYS)c++});items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>ALERT_HIGH_VALUE_COST).forEach(()=>c++);return c},[items]);
 
   const awaitingShipCount=useMemo(()=>{const shipped=new Set(shipments.map(s=>s.itemId));return items.filter(i=>i.status==="Sold"&&!shipped.has(i.id)).length},[items,shipments]);
@@ -1657,7 +1722,7 @@ export default function App(){
         <div style={{padding:"14px 12px",borderTop:"1px solid #1E2330",marginTop:8}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:30,height:30,borderRadius:"50%",background:"linear-gradient(135deg,#6366F1,#10B981)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:600}}>EV</div>
-            <div><div style={{fontSize:12,fontWeight:500}}>East Valley HQ</div><div style={{fontSize:10,color:"#5A6478"}}>Pro Plan</div></div>
+            <div><div style={{fontSize:12,fontWeight:500}}>East Valley HQ</div><div style={{fontSize:10,color:"#5A6478",display:"flex",alignItems:"center",gap:4}}>{hasConfig&&<span style={{width:6,height:6,borderRadius:"50%",background:fbOnline?"#10B981":"#F59E0B",flexShrink:0}}/>}{hasConfig?(fbOnline?"Synced":"Offline"):"Local Only"}</div></div>
           </div>
         </div>
       </div>
