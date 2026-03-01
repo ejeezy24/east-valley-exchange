@@ -125,11 +125,13 @@ const BTN=(primary)=>({padding:"9px 20px",borderRadius:8,border:primary?"none":"
 const Toast=({message,type,onClose})=>{useEffect(()=>{const t=setTimeout(onClose,3000);return()=>clearTimeout(t)},[onClose]);const bg=type==="success"?"#10B981":type==="error"?"#F43F5E":"#6366F1";return(<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"#171B24",border:`1px solid ${bg}40`,borderRadius:12,padding:"12px 20px",display:"flex",alignItems:"center",gap:10,boxShadow:`0 8px 32px ${bg}20`,animation:"slideUp 0.3s ease"}}><span style={{fontSize:13,fontWeight:500}}>{message}</span></div>)};
 
 // ─── STORAGE ─────────────────────────────────────────────────────────────────
-function useStorage(key,def){
+function useStorage(key,def,onError){
   const[data,setData]=useState(def);
   const[loaded,setLoaded]=useState(false);
-  useEffect(()=>{(async()=>{try{const r=await window.storage.get(key);if(r&&r.value)setData(JSON.parse(r.value))}catch(e){}setLoaded(true)})()},[key]);
-  const save=useCallback(async(nd)=>{setData(nd);try{await window.storage.set(key,JSON.stringify(nd))}catch(e){console.error(e)}},[key]);
+  const onErrRef=useRef(onError);
+  onErrRef.current=onError;
+  useEffect(()=>{(async()=>{try{const r=await window.storage.get(key);if(r&&r.value)setData(JSON.parse(r.value))}catch(e){console.error("Storage load error:",key,e);onErrRef.current?.("Failed to load saved data. Using defaults.")}setLoaded(true)})()},[key]);
+  const save=useCallback(async(nd)=>{setData(nd);try{await window.storage.set(key,JSON.stringify(nd))}catch(e){console.error("Storage save error:",key,e);onErrRef.current?.("Failed to save changes. Data may not persist.")}},[key]);
   return[data,save,loaded];
 }
 
@@ -1270,14 +1272,15 @@ function ReportsPage({items,expenses,shipments}){
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
 export default function App(){
   const[page,setPage]=useState("dashboard");
-  const[items,saveItems,il]=useStorage("eve-items-v2",DEFAULT_ITEMS);
-  const[pos,savePOs,pl]=useStorage("eve-pos-v2",DEFAULT_POS);
-  const[expenses,saveExpenses,el]=useStorage("eve-expenses",DEFAULT_EXPENSES);
-  const[customers,saveCustomers,cl]=useStorage("eve-customers",DEFAULT_CUSTOMERS);
-  const[shipments,saveShipments,sl]=useStorage("eve-shipments",DEFAULT_SHIPMENTS);
   const[sidebarOpen,setSidebarOpen]=useState(false);
   const[toastMsg,setToastMsg]=useState(null);
   const toast=(m,t)=>setToastMsg({message:m,type:t});
+  const storageError=useCallback((m)=>toast(m,"error"),[]);
+  const[items,saveItems,il]=useStorage("eve-items-v2",DEFAULT_ITEMS,storageError);
+  const[pos,savePOs,pl]=useStorage("eve-pos-v2",DEFAULT_POS,storageError);
+  const[expenses,saveExpenses,el]=useStorage("eve-expenses",DEFAULT_EXPENSES,storageError);
+  const[customers,saveCustomers,cl]=useStorage("eve-customers",DEFAULT_CUSTOMERS,storageError);
+  const[shipments,saveShipments,sl]=useStorage("eve-shipments",DEFAULT_SHIPMENTS,storageError);
 
   const alertCount=useMemo(()=>{let c=0;items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{if(((i.price-i.cost)/i.price)*100<20)c++});const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{if(Math.floor((now-new Date(i.received))/(1000*60*60*24))>10)c++});items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>100).forEach(()=>c++);return c},[items]);
 
