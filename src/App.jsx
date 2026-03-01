@@ -11,6 +11,15 @@ fl.rel = "stylesheet";
 if (!document.querySelector(`link[href="${fl.href}"]`)) document.head.appendChild(fl);
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
+// ─── THRESHOLDS & LIMITS ─────────────────────────────────────────────────────
+const ALERT_LOW_MARGIN_PCT   = 20;   // warn when margin is below this %
+const ALERT_SLOW_MOVER_DAYS  = 10;   // warn when listed longer than this many days
+const ALERT_HIGH_VALUE_COST  = 100;  // warn when item cost exceeds this amount
+const ALERT_LARGE_EXPENSE    = 500;  // warn when a single expense exceeds this amount
+const DASH_RECENT_ITEMS      = 6;    // recent items shown on dashboard
+const TABLE_TOP_PERFORMERS   = 5;    // rows in top-performer tables
+const TABLE_OLDEST_ITEMS     = 10;   // rows in oldest-items aging table
+
 const CATEGORIES = ["Electronics","Home & Kitchen","Apparel & Shoes","Toys & Games","Sports & Outdoors","Beauty & Health","Tools & Hardware","Automotive","Books & Media","Other"];
 const CONDITIONS = ["New - Sealed","New w/ Tags","New - Open Box","Like New","Good","Fair","Refurbished","For Parts"];
 const CHANNELS = ["eBay","Amazon","Direct / Website","Wholesale","Facebook Marketplace","Whatnot","Mercari","OfferUp"];
@@ -576,7 +585,7 @@ function DashboardPage({items,expenses,setPage}){
       <div style={{background:"#171B24",border:"1px solid #1E2330",borderRadius:14,padding:24}}>
         <div style={{fontSize:15,fontWeight:600,marginBottom:16}}>Recent Items</div>
         <div className="eve-grid-3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
-          {[...items].sort((a,b)=>b.received.localeCompare(a.received)).slice(0,6).map(i=>{
+          {[...items].sort((a,b)=>b.received.localeCompare(a.received)).slice(0,DASH_RECENT_ITEMS).map(i=>{
             const icons2={Received:"📦",Grading:"🔍",Processing:"⚙️",Listed:"📋",Sold:"💰",Shipped:"🚚"};
             return(<div key={i.id} style={{background:"#0D0F14",borderRadius:10,padding:14,display:"flex",gap:10,alignItems:"center"}}>
               <span style={{fontSize:18}}>{icons2[i.status]||"📦"}</span>
@@ -827,9 +836,9 @@ function AnalyticsPage({items,expenses,shipments}){
   const chColors={"eBay":"#F59E0B","Amazon":"#6366F1","Direct / Website":"#10B981","Wholesale":"#EC4899","Facebook Marketplace":"#06B6D4","Whatnot":"#F43F5E","Mercari":"#8B5CF6","OfferUp":"#14B8A6"};
 
   // Top performers
-  const topProfit=[...soldItems].filter(i=>i.price>0).map(i=>({...i,profit:(i.price||0)-i.cost,margin:Math.round(((i.price-i.cost)/i.price)*100)})).sort((a,b)=>b.profit-a.profit).slice(0,5);
-  const topMargin=[...soldItems].filter(i=>i.price>0).map(i=>({...i,profit:(i.price||0)-i.cost,margin:Math.round(((i.price-i.cost)/i.price)*100)})).sort((a,b)=>b.margin-a.margin).slice(0,5);
-  const fastestSellers=[...soldItems].filter(i=>safeDate(i.soldDate)&&safeDate(i.received)).map(i=>{const sold=safeDate(i.soldDate);const rcvd=safeDate(i.received);return{...i,days:Math.max(0,Math.floor((sold-rcvd)/(1000*60*60*24))),profit:(i.price||0)-i.cost}}).sort((a,b)=>a.days-b.days).slice(0,5);
+  const topProfit=[...soldItems].filter(i=>i.price>0).map(i=>({...i,profit:(i.price||0)-i.cost,margin:Math.round(((i.price-i.cost)/i.price)*100)})).sort((a,b)=>b.profit-a.profit).slice(0,TABLE_TOP_PERFORMERS);
+  const topMargin=[...soldItems].filter(i=>i.price>0).map(i=>({...i,profit:(i.price||0)-i.cost,margin:Math.round(((i.price-i.cost)/i.price)*100)})).sort((a,b)=>b.margin-a.margin).slice(0,TABLE_TOP_PERFORMERS);
+  const fastestSellers=[...soldItems].filter(i=>safeDate(i.soldDate)&&safeDate(i.received)).map(i=>{const sold=safeDate(i.soldDate);const rcvd=safeDate(i.received);return{...i,days:Math.max(0,Math.floor((sold-rcvd)/(1000*60*60*24))),profit:(i.price||0)-i.cost}}).sort((a,b)=>a.days-b.days).slice(0,TABLE_TOP_PERFORMERS);
 
   const tabs2=[{id:"overview",label:"Overview"},{id:"aging",label:"Inventory Aging"},{id:"channels",label:"Channel Performance"},{id:"top",label:"Top Performers"}];
 
@@ -924,7 +933,7 @@ function AnalyticsPage({items,expenses,shipments}){
       <div className="eve-table-wrap" style={{background:"#171B24",border:"1px solid #1E2330",borderRadius:14,padding:24}}>
         <div style={{fontSize:15,fontWeight:600,marginBottom:16}}>Oldest Unsold Items</div>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{borderBottom:"1px solid #1E2330"}}>{["ID","Product","Category","Status","Cost","Price","Days Held","Source"].map(h=>(<th key={h} style={{padding:"10px 12px",textAlign:"left",fontSize:11,fontWeight:600,color:"#5A6478",textTransform:"uppercase"}}>{h}</th>))}</tr></thead><tbody>
-          {[...agingItems].sort((a,b)=>(safeDate(a.received)||0)-(safeDate(b.received)||0)).slice(0,10).map(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;return(<tr key={i.id} style={{borderBottom:"1px solid #1E2330"}}>
+          {[...agingItems].sort((a,b)=>(safeDate(a.received)||0)-(safeDate(b.received)||0)).slice(0,TABLE_OLDEST_ITEMS).map(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;return(<tr key={i.id} style={{borderBottom:"1px solid #1E2330"}}>
             <td style={{padding:"10px 12px",fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"#818CF8"}}>{i.id}</td>
             <td style={{padding:"10px 12px",fontWeight:500,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i.name}</td>
             <td style={{padding:"10px 12px",color:"#8B95A9",fontSize:12}}>{i.category}</td>
@@ -1116,13 +1125,13 @@ function CustomersPage({customers,saveCustomers,items,toast}){
 function AlertsPage({items,expenses}){
   const alerts=[];
   // Low margin items
-  items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{const margin=((i.price-i.cost)/i.price)*100;if(margin<20)alerts.push({type:"warn",icon:"⚠️",title:`Low margin: ${i.name}`,desc:`Only ${margin.toFixed(0)}% margin (cost ${fmt(i.cost)}, price ${fmt(i.price)})`,category:"Low Margin"})});
-  // Slow movers (listed > 10 days ago)
-  const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;if(days>10)alerts.push({type:"info",icon:"🐌",title:`Slow mover: ${i.name}`,desc:`Listed for ${days} days — consider a price drop`,category:"Slow Mover"})});
+  items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{const margin=((i.price-i.cost)/i.price)*100;if(margin<ALERT_LOW_MARGIN_PCT)alerts.push({type:"warn",icon:"⚠️",title:`Low margin: ${i.name}`,desc:`Only ${margin.toFixed(0)}% margin (cost ${fmt(i.cost)}, price ${fmt(i.price)})`,category:"Low Margin"})});
+  // Slow movers (listed > ALERT_SLOW_MOVER_DAYS days ago)
+  const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{const rcvd=safeDate(i.received);const days=rcvd?Math.floor((now-rcvd)/(1000*60*60*24)):0;if(days>ALERT_SLOW_MOVER_DAYS)alerts.push({type:"info",icon:"🐌",title:`Slow mover: ${i.name}`,desc:`Listed for ${days} days — consider a price drop`,category:"Slow Mover"})});
   // High value items stuck in processing/grading
-  items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>100).forEach(i=>{alerts.push({type:"action",icon:"⏰",title:`High-value item in ${i.status}: ${i.name}`,desc:`${fmt(i.cost)} cost — move to Listed to start recovering`,category:"Action Needed"})});
+  items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>ALERT_HIGH_VALUE_COST).forEach(i=>{alerts.push({type:"action",icon:"⏰",title:`High-value item in ${i.status}: ${i.name}`,desc:`${fmt(i.cost)} cost — move to Listed to start recovering`,category:"Action Needed"})});
   // Large expenses
-  expenses.filter(e=>e.amount>500).forEach(e=>{alerts.push({type:"info",icon:"💸",title:`Large expense: ${e.category}`,desc:`${fmt(e.amount)} — ${e.description}`,category:"Expense Alert"})});
+  expenses.filter(e=>e.amount>ALERT_LARGE_EXPENSE).forEach(e=>{alerts.push({type:"info",icon:"💸",title:`Large expense: ${e.category}`,desc:`${fmt(e.amount)} — ${e.description}`,category:"Expense Alert"})});
   // No price set on listed items
   items.filter(i=>i.status==="Listed"&&!i.price).forEach(i=>{alerts.push({type:"warn",icon:"🏷️",title:`No price set: ${i.name}`,desc:"This item is listed but has no price — set one to track margin",category:"Missing Data"})});
 
@@ -1345,7 +1354,7 @@ export default function App(){
   const[customers,saveCustomers,cl]=useStorage("eve-customers",DEFAULT_CUSTOMERS,storageError);
   const[shipments,saveShipments,sl]=useStorage("eve-shipments",DEFAULT_SHIPMENTS,storageError);
 
-  const alertCount=useMemo(()=>{let c=0;items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{if(((i.price-i.cost)/i.price)*100<20)c++});const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{const rcvd=safeDate(i.received);if(rcvd&&Math.floor((now-rcvd)/(1000*60*60*24))>10)c++});items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>100).forEach(()=>c++);return c},[items]);
+  const alertCount=useMemo(()=>{let c=0;items.filter(i=>i.status==="Listed"&&i.price>0).forEach(i=>{if(((i.price-i.cost)/i.price)*100<ALERT_LOW_MARGIN_PCT)c++});const now=new Date();items.filter(i=>i.status==="Listed").forEach(i=>{const rcvd=safeDate(i.received);if(rcvd&&Math.floor((now-rcvd)/(1000*60*60*24))>ALERT_SLOW_MOVER_DAYS)c++});items.filter(i=>["Grading","Processing"].includes(i.status)&&i.cost>ALERT_HIGH_VALUE_COST).forEach(()=>c++);return c},[items]);
 
   const awaitingShipCount=useMemo(()=>{const shipped=new Set(shipments.map(s=>s.itemId));return items.filter(i=>i.status==="Sold"&&!shipped.has(i.id)).length},[items,shipments]);
 
