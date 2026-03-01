@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
 
 // ─── FONT ────────────────────────────────────────────────────────────────────
@@ -156,10 +156,8 @@ const Toast=({message,type,onClose,onUndo})=>{useEffect(()=>{const t=setTimeout(
 function useStorage(key,def,onError){
   const[data,setData]=useState(def);
   const[loaded,setLoaded]=useState(false);
-  const onErrRef=useRef(onError);
-  onErrRef.current=onError;
-  useEffect(()=>{(async()=>{try{const r=await window.storage.get(key);if(r&&r.value)setData(JSON.parse(r.value))}catch(e){console.error("Storage load error:",key,e);onErrRef.current?.("Failed to load saved data. Using defaults.")}setLoaded(true)})()},[key]);
-  const save=useCallback(async(nd)=>{setData(nd);try{await window.storage.set(key,JSON.stringify(nd))}catch(e){console.error("Storage save error:",key,e);onErrRef.current?.("Failed to save changes. Data may not persist.")}},[key]);
+  useEffect(()=>{(async()=>{try{const r=await window.storage.get(key);if(r&&r.value)setData(JSON.parse(r.value))}catch(e){console.error("Storage load error:",key,e);onError?.("Failed to load saved data. Using defaults.")}setLoaded(true)})()},[key,onError]);
+  const save=useCallback(async(nd)=>{setData(nd);try{await window.storage.set(key,JSON.stringify(nd))}catch(e){console.error("Storage save error:",key,e);onError?.("Failed to save changes. Data may not persist.")}},[key,onError]);
   return[data,save,loaded];
 }
 
@@ -493,7 +491,6 @@ function generateInventoryReport(items){
 }
 
 function generateMonthlyReport(items,expenses,shipments,month){
-  const monthItems=items.filter(i=>i.received?.startsWith(month)||i.soldDate?.startsWith(month));
   const monthSold=items.filter(i=>["Sold","Shipped"].includes(i.status)&&i.soldDate?.startsWith(month));
   const monthReceived=items.filter(i=>i.received?.startsWith(month));
   const monthExp=expenses.filter(e=>e.date?.startsWith(month));
@@ -746,7 +743,7 @@ function ListingsPage({items,saveItems,toast}){
   return(<div className="eve-page-pad" style={{padding:"28px 32px",display:"flex",flexDirection:"column",gap:20}}>
     <div className="eve-grid-3" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>{[{label:"Active Listings",value:listed.length,color:"#6366F1"},{label:"Total Listed Value",value:fmt(totalValue),color:"#10B981"},{label:"Potential Profit",value:fmt(potentialProfit),color:"#F59E0B"}].map((s,i)=>(<div key={i} style={{background:"#171B24",border:"1px solid #1E2330",borderRadius:12,padding:"18px 20px"}}><div style={{fontSize:11,color:"#5A6478",fontWeight:500,textTransform:"uppercase",letterSpacing:"0.5px"}}>{s.label}</div><div style={{fontSize:28,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",letterSpacing:-1,marginTop:4,color:s.color}}>{s.value}</div></div>))}</div>
     <div className="eve-table-wrap" style={{background:"#171B24",border:"1px solid #1E2330",borderRadius:14,overflow:"hidden"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{borderBottom:"1px solid #1E2330"}}>{["ID","Product","Channel","Cost","Price","Profit","Margin","Condition",""].map(h=>(<th key={h} style={{padding:"12px 14px",textAlign:"left",fontSize:11,fontWeight:600,color:"#5A6478",textTransform:"uppercase"}}>{h}</th>))}</tr></thead><tbody>
-      {listed.length===0?<tr><td colSpan={9} style={{padding:40,textAlign:"center",color:"#5A6478"}}>No active listings. Move items to "Listed" status.</td></tr>:
+      {listed.length===0?<tr><td colSpan={9} style={{padding:40,textAlign:"center",color:"#5A6478"}}>No active listings. Move items to &ldquo;Listed&rdquo; status.</td></tr>:
       listed.map(l=>{const profit=(l.price||0)-l.cost;const margin=l.price>0?Math.round((profit/l.price)*100):0;return(<tr key={l.id} style={{borderBottom:"1px solid #1E2330"}} onMouseEnter={e=>e.currentTarget.style.background="#1C2130"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
         <td style={{padding:"12px 14px",fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"#818CF8"}}>{l.id}</td>
         <td style={{padding:"12px 14px",fontWeight:500,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.name}</td>
@@ -1164,7 +1161,6 @@ function ShippingPage({shipments,saveShipments,items,customers,toast}){
 
   const totalShipCost=shipments.reduce((s,sh)=>s+sh.shippingCost,0);
   const inTransit=shipments.filter(s=>["Pending","Label Created","Picked Up","In Transit","Out for Delivery"].includes(s.status));
-  const delivered=shipments.filter(s=>s.status==="Delivered");
 
   const filtered=filter==="All"?shipments:shipments.filter(s=>s.status===filter);
 
@@ -1259,7 +1255,6 @@ function ReportsPage({items,expenses,shipments}){
 
   // Summary data for selected month
   const monthSold=items.filter(i=>["Sold","Shipped"].includes(i.status)&&i.soldDate?.startsWith(selectedMonth));
-  const monthReceived=items.filter(i=>i.received?.startsWith(selectedMonth));
   const monthExp=expenses.filter(e=>e.date?.startsWith(selectedMonth));
   const monthShip=shipments.filter(s=>s.shipDate?.startsWith(selectedMonth));
   const rev=monthSold.reduce((s,i)=>s+(i.price||0),0);
